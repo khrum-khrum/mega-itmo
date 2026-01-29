@@ -1,0 +1,45 @@
+[project]
+name = "ai-sdlc-agent"
+version = "0.1.0"
+description = "AI-powered SDLC automation agent for GitHub"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyGithub>=2.1.1", 
+    "openai>=1.12.0", 
+    "click>=8.1.7",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "black>=23.0.0",
+    "mypy>=1.5.0",
+]
+
+[project.scripts]
+code-agent = "src.code_agent.cli:main"
+review-agent = "src.review_agent.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+lint.select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  code-agent:
+    build: .
+    container_name: code-agent
+    env_file:
+      - .env
+    command: ["src.code_agent.cli", "--help"]
+    
+  review-agent:
+    build: .
+    container_name: review-agent
+    env_file:
+      - .env
+    command: ["src.review_agent.cli", "--help"]

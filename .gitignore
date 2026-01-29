@@ -1,0 +1,17 @@
+__pycache__/
+
+*.so
+
+.venv/
+
+.vscode/
+
+.DS_Store
+
+.pytest_cache/
+.coverage
+
+.env
+.env.local
+
+.ruff_cache
