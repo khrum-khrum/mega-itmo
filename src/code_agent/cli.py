@@ -1,17 +1,18 @@
 """CLI для Code Agent."""
-
 import sys
 
 import click
 
+from src.code_agent.agent import CodeAgent
 from src.utils.github_client import GitHubClient
+from src.utils.llm_client import LLMClient
 
 
 @click.command()
 @click.option(
     "--repo",
-    required=True,
-    help="GitHub репозиторий в формате owner/repo",
+    envvar="GITHUB_REPO",
+    help="GitHub репозиторий в формате owner/repo (любой репозиторий). Если не указан, используется GITHUB_REPO из .env",
 )
 @click.option(
     "--issue",
@@ -22,70 +23,179 @@ from src.utils.github_client import GitHubClient
 @click.option(
     "--token",
     envvar="GITHUB_TOKEN",
-    help="GitHub Personal Access Token (или переменная GITHUB_TOKEN)",
+    help="GitHub Personal Access Token",
+)
+@click.option(
+    "--api-key",
+    envvar="OPENROUTER_API_KEY",
+    help="OpenRouter API Key",
+)
+@click.option(
+    "--model",
+    default="meta-llama/llama-3.1-70b-instruct",
+    help="Модель LLM. Примеры: meta-llama/llama-3.1-70b-instruct, anthropic/claude-3.5-sonnet, openai/gpt-4o",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Только показать информацию, не вносить изменения",
+    default=True,
+    help="Только показать сгенерированный код (по умолчанию)",
 )
 @click.option(
-    "--show-structure",
+    "--execute",
     is_flag=True,
-    help="Показать структуру репозитория",
+    help="Создать PR с решением (отключает dry-run)",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Подробный вывод (показать контекст)",
 )
 def main(
-    repo: str,
+    repo: str | None,
     issue: int,
     token: str | None,
+    api_key: str | None,
+    model: str,
     dry_run: bool,
-    show_structure: bool,
+    execute: bool,
+    verbose: bool,
 ) -> None:
     """
-    Code Agent - анализирует Issue и создаёт PR с решением.
+    Code Agent - анализирует Issue и генерирует код для решения.
 
-    Примеры использования:
+    Работает с ЛЮБЫМИ репозиториями на ЛЮБЫХ языках программирования.
 
-        # Прочитать Issue
-        python -m src.code_agent.cli --repo owner/repo --issue 1
+    \b
+    Примеры:
+        # Анализ Issue с Llama (по умолчанию)
+        python -m src.code_agent.cli --repo facebook/react --issue 1234
 
-        # Показать структуру репозитория
-        python -m src.code_agent.cli --repo owner/repo --issue 1 --show-structure
+        # Использование GITHUB_REPO из .env
+        python -m src.code_agent.cli --issue 1234
+
+        # Использование другой модели
+        python -m src.code_agent.cli --repo owner/repo --issue 1 --model anthropic/claude-3.5-sonnet
+
+        # Использование GPT-4o
+        python -m src.code_agent.cli --repo owner/repo --issue 1 --model openai/gpt-4o
+
+        # С подробным выводом контекста
+        python -m src.code_agent.cli --repo owner/repo --issue 1 -v
+
+        # Создать PR (когда будет реализовано)
+        python -m src.code_agent.cli --repo owner/repo --issue 1 --execute
     """
-    click.echo("🤖 Code Agent запущен\n")
+    if execute:
+        dry_run = False
 
-    # Инициализируем клиент
+    if not repo:
+        click.echo("❌ Ошибка: --repo не указан и GITHUB_REPO не задан в .env", err=True)
+        sys.exit(1)
+
+    click.echo("🤖 Code Agent запущен")
+    click.echo(f"   Целевой репозиторий: {repo}")
+    click.echo()
+
+    # === Инициализация ===
     try:
-        client = GitHubClient(token=token)
+        github_client = GitHubClient(token=token)
+        click.echo("✅ GitHub клиент инициализирован")
     except ValueError as e:
-        click.echo(f"❌ Ошибка: {e}", err=True)
+        click.echo(f"❌ Ошибка GitHub: {e}", err=True)
         sys.exit(1)
 
-    # Получаем Issue
-    click.echo(f"📋 Загружаю Issue #{issue} из {repo}...")
     try:
-        issue_data = client.get_issue(repo, issue)
-    except Exception as e:
-        click.echo(f"❌ Не удалось получить Issue: {e}", err=True)
+        llm_client = LLMClient(api_key=api_key, model=model)
+        click.echo(f"✅ LLM клиент инициализирован (OpenRouter: {model})")
+    except ValueError as e:
+        click.echo(f"❌ Ошибка LLM: {e}", err=True)
         sys.exit(1)
 
-    click.echo("\n" + "=" * 50)
-    click.echo(str(issue_data))
-    click.echo("=" * 50 + "\n")
+    agent = CodeAgent(github_client=github_client, llm_client=llm_client)
 
-    # Показываем структуру репозитория
-    if show_structure:
+    # === Анализ Issue ===
+    click.echo(f"\n📋 Анализирую Issue #{issue}...")
+
+    try:
+        context = agent.analyze_issue(repo, issue)
+    except Exception as e:
+        click.echo(f"❌ Ошибка при анализе: {e}", err=True)
+        sys.exit(1)
+
+    # Выводим информацию об Issue
+    click.echo(f"\n{'='*60}")
+    click.echo(f"📌 Issue #{context.issue.number}: {context.issue.title}")
+    click.echo(f"🏷️  Labels: {', '.join(context.issue.labels) or 'нет'}")
+    click.echo(f"🔗 {context.issue.url}")
+    click.echo(f"{'='*60}")
+    click.echo(f"\n{context.issue.body[:800]}{'...' if len(context.issue.body) > 800 else ''}")
+
+    # Показываем собранный контекст
+    click.echo(f"\n📊 Собранный контекст:")
+    click.echo(f"   - Конфигурационных файлов: {len(context.config_files)}")
+    click.echo(f"   - Связанных файлов: {len(context.related_files)}")
+
+    if verbose:
+        click.echo(f"\n{'─'*60}")
         click.echo("📁 Структура репозитория:")
-        click.echo("-" * 30)
-        structure = client.get_repo_structure(repo)
-        click.echo(structure)
-        click.echo("-" * 30 + "\n")
+        click.echo(f"{'─'*60}")
+        click.echo(context.repo_structure[:2000])
+        if len(context.repo_structure) > 2000:
+            click.echo("... (truncated)")
 
+        if context.config_files:
+            click.echo(f"\n{'─'*60}")
+            click.echo("⚙️ Найденные конфиги:")
+            click.echo(f"{'─'*60}")
+            for path in context.config_files:
+                click.echo(f"   - {path}")
+
+        if context.related_files:
+            click.echo(f"\n{'─'*60}")
+            click.echo("📄 Связанные файлы:")
+            click.echo(f"{'─'*60}")
+            for path in context.related_files:
+                click.echo(f"   - {path}")
+
+    # === Генерация решения ===
+    click.echo(f"\n🧠 Генерирую решение...")
+
+    try:
+        solution = agent.generate_solution(context)
+    except Exception as e:
+        click.echo(f"❌ Ошибка генерации: {e}", err=True)
+        sys.exit(1)
+
+    # === Вывод результата ===
+    click.echo(f"\n{'='*60}")
+    click.echo("📦 СГЕНЕРИРОВАННОЕ РЕШЕНИЕ")
+    click.echo(f"{'='*60}\n")
+
+    click.echo(str(solution))
+
+    # Показываем файлы
+    click.echo(f"\n{'─'*60}")
+    click.echo("📄 СОДЕРЖИМОЕ ФАЙЛОВ")
+    click.echo(f"{'─'*60}")
+
+    for change in solution.changes:
+        click.echo(f"\n{'═'*60}")
+        click.echo(f"📄 {change.file_path} [{change.action.upper()}]")
+        click.echo(f"{'═'*60}")
+
+        # Подсветка синтаксиса в терминале (просто выводим код)
+        click.echo(change.content)
+
+    # === Итог ===
     if dry_run:
-        click.echo("ℹ️  Режим dry-run: изменения не вносятся")
-
-    click.echo("✅ Issue успешно загружен!")
-    click.echo("\n🚧 Генерация кода будет реализована в следующем этапе.")
+        click.echo(f"\n{'─'*60}")
+        click.echo("ℹ️  Режим DRY-RUN: изменения НЕ применены")
+        click.echo("   Для создания PR добавь флаг --execute")
+        click.echo(f"{'─'*60}")
+    else:
+        click.echo(f"\n🚧 Создание PR будет реализовано в Этапе 3")
 
 
 if __name__ == "__main__":
