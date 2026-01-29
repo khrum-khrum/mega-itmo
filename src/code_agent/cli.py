@@ -13,7 +13,10 @@ from src.utils.llm_client import LLMClient
 @click.option(
     "--repo",
     envvar="GITHUB_REPO",
-    help="GitHub репозиторий в формате owner/repo (любой репозиторий). Если не указан, используется GITHUB_REPO из .env",
+    help=(
+        "GitHub репозиторий в формате owner/repo (любой репозиторий). "
+        "Если не указан, используется GITHUB_REPO из .env"
+    ),
 )
 @click.option(
     "--issue",
@@ -34,7 +37,10 @@ from src.utils.llm_client import LLMClient
 @click.option(
     "--model",
     default="meta-llama/llama-3.1-70b-instruct",
-    help="Модель LLM. Примеры: meta-llama/llama-3.1-70b-instruct, anthropic/claude-3.5-sonnet, openai/gpt-4o",
+    help=(
+        "Модель LLM. Примеры: meta-llama/llama-3.1-70b-instruct, "
+        "anthropic/claude-3.5-sonnet, openai/gpt-4o"
+    ),
 )
 @click.option(
     "--dry-run",
@@ -196,7 +202,18 @@ def main(
         click.echo("   Для создания PR добавь флаг --execute")
         click.echo(f"{'─'*60}")
     else:
-        click.echo("\n🚧 Создание PR будет реализовано в Этапе 3")
+        # === Создание Pull Request ===
+        click.echo(f"\n{'='*60}")
+        click.echo("🚀 СОЗДАНИЕ PULL REQUEST")
+        click.echo(f"{'='*60}\n")
+
+        try:
+            pr_url = agent.create_pull_request(context, solution)
+            click.echo("✅ Pull Request успешно создан!")
+            click.echo(f"🔗 {pr_url}")
+        except RuntimeError as e:
+            click.echo(f"❌ Ошибка создания PR: {e}", err=True)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
