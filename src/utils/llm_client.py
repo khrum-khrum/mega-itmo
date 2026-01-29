@@ -1,4 +1,5 @@
 """Клиент для работы с LLM (Large Language Models)."""
+
 import json
 import os
 import re
@@ -7,8 +8,8 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from openrouter import OpenRouter
 from openrouter.errors import (
-    BadRequestResponseError,
     BadGatewayResponseError,
+    BadRequestResponseError,
     ChatError,
     EdgeNetworkTimeoutResponseError,
     InternalServerResponseError,
@@ -23,7 +24,6 @@ from openrouter.errors import (
     UnauthorizedResponseError,
     UnprocessableEntityResponseError,
 )
-
 
 load_dotenv()
 
@@ -162,9 +162,7 @@ class LLMClient:
         Returns:
             Сгенерированное решение
         """
-        user_prompt = self._build_prompt(
-            issue_title, issue_body, repo_structure, existing_files
-        )
+        user_prompt = self._build_prompt(issue_title, issue_body, repo_structure, existing_files)
 
         try:
             response = self._client.chat.send(
@@ -265,28 +263,34 @@ class LLMClient:
         ]
 
         if existing_files:
-            prompt_parts.extend([
-                "",
-                "# СУЩЕСТВУЮЩИЕ ФАЙЛЫ",
-                "(изучи для понимания стиля кода и контекста)",
-            ])
+            prompt_parts.extend(
+                [
+                    "",
+                    "# СУЩЕСТВУЮЩИЕ ФАЙЛЫ",
+                    "(изучи для понимания стиля кода и контекста)",
+                ]
+            )
             for path, content in existing_files.items():
                 # Определяем расширение для подсветки синтаксиса
                 ext = path.split(".")[-1] if "." in path else ""
-                prompt_parts.extend([
-                    f"## {path}",
-                    f"```{ext}",
-                    content,
-                    "```",
-                    "",
-                ])
+                prompt_parts.extend(
+                    [
+                        f"## {path}",
+                        f"```{ext}",
+                        content,
+                        "```",
+                        "",
+                    ]
+                )
 
-        prompt_parts.extend([
-            "# ИНСТРУКЦИЯ",
-            "1. Определи язык и стек проекта по структуре и файлам",
-            "2. Сгенерируй решение, соответствующее стилю проекта",
-            "3. Верни JSON в указанном формате",
-        ])
+        prompt_parts.extend(
+            [
+                "# ИНСТРУКЦИЯ",
+                "1. Определи язык и стек проекта по структуре и файлам",
+                "2. Сгенерируй решение, соответствующее стилю проекта",
+                "3. Верни JSON в указанном формате",
+            ]
+        )
 
         return "\n".join(prompt_parts)
 
@@ -308,7 +312,7 @@ class LLMClient:
             # Находим первую строку (```json или просто ```)
             first_newline = text.find("\n")
             if first_newline != -1:
-                text = text[first_newline + 1:]  # Убираем первую строку с ```
+                text = text[first_newline + 1 :]  # Убираем первую строку с ```
 
         if text.endswith("```"):
             text = text[:-3]  # Убираем закрывающие ```
@@ -380,11 +384,13 @@ class LLMClient:
 
         changes = []
         for change_data in data.get("changes", []):
-            changes.append(CodeChange(
-                file_path=change_data.get("file_path", ""),
-                content=change_data.get("content", ""),
-                action=change_data.get("action", "create"),
-            ))
+            changes.append(
+                CodeChange(
+                    file_path=change_data.get("file_path", ""),
+                    content=change_data.get("content", ""),
+                    action=change_data.get("action", "create"),
+                )
+            )
 
         return GeneratedSolution(
             changes=changes,

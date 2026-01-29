@@ -1,4 +1,5 @@
 """Клиент для работы с GitHub API."""
+
 import os
 from dataclasses import dataclass
 
@@ -6,7 +7,6 @@ from dotenv import load_dotenv
 from github import Github
 from github.Issue import Issue
 from github.Repository import Repository
-
 
 load_dotenv()
 
@@ -148,7 +148,14 @@ class GitHubClient:
                         ".gitignore",
                     ]:
                         continue
-                    if content.name in ["node_modules", "__pycache__", ".git", "venv", "dist", "build"]:
+                    if content.name in [
+                        "node_modules",
+                        "__pycache__",
+                        ".git",
+                        "venv",
+                        "dist",
+                        "build",
+                    ]:
                         continue
 
                     indent = "  " * depth
@@ -234,8 +241,8 @@ class GitHubClient:
         # Ищем пути к файлам (любые расширения)
         # Паттерн: слова с / или . внутри, заканчивающиеся на расширение
         patterns = [
-            r'[a-zA-Z0-9_\-/]+\.[a-zA-Z0-9]+',  # path/to/file.ext
-            r'`([^`]+\.[a-zA-Z0-9]+)`',  # `file.ext` в backticks
+            r"[a-zA-Z0-9_\-/]+\.[a-zA-Z0-9]+",  # path/to/file.ext
+            r"`([^`]+\.[a-zA-Z0-9]+)`",  # `file.ext` в backticks
         ]
 
         found_paths = set()
@@ -244,7 +251,7 @@ class GitHubClient:
             found_paths.update(matches)
 
         # Пробуем получить каждый файл
-        for path in list(found_paths)[:max_files * 2]:
+        for path in list(found_paths)[: max_files * 2]:
             # Очищаем путь
             path = path.strip("`'\"")
             if not path or path.startswith("http"):

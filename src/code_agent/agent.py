@@ -1,8 +1,9 @@
 """Основная логика Code Agent."""
+
 from dataclasses import dataclass, field
 
 from src.utils.github_client import GitHubClient, IssueData
-from src.utils.llm_client import LLMClient, GeneratedSolution
+from src.utils.llm_client import GeneratedSolution, LLMClient
 
 
 @dataclass

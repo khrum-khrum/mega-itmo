@@ -1,4 +1,5 @@
 """CLI для Code Agent."""
+
 import sys
 
 import click
@@ -133,7 +134,7 @@ def main(
     click.echo(f"\n{context.issue.body[:800]}{'...' if len(context.issue.body) > 800 else ''}")
 
     # Показываем собранный контекст
-    click.echo(f"\n📊 Собранный контекст:")
+    click.echo("\n📊 Собранный контекст:")
     click.echo(f"   - Конфигурационных файлов: {len(context.config_files)}")
     click.echo(f"   - Связанных файлов: {len(context.related_files)}")
 
@@ -160,7 +161,7 @@ def main(
                 click.echo(f"   - {path}")
 
     # === Генерация решения ===
-    click.echo(f"\n🧠 Генерирую решение...")
+    click.echo("\n🧠 Генерирую решение...")
 
     try:
         solution = agent.generate_solution(context)
@@ -195,7 +196,7 @@ def main(
         click.echo("   Для создания PR добавь флаг --execute")
         click.echo(f"{'─'*60}")
     else:
-        click.echo(f"\n🚧 Создание PR будет реализовано в Этапе 3")
+        click.echo("\n🚧 Создание PR будет реализовано в Этапе 3")
 
 
 if __name__ == "__main__":
