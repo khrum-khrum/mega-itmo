@@ -1,16 +1,16 @@
 version: '3.8'
 
 services:
-  code-agent:
+  code-agent-api:
     build: .
-    container_name: code-agent
+    container_name: code-agent-api
     env_file:
       - .env
-    command: ["src.code_agent.cli", "--help"]
-    
-  review-agent:
-    build: .
-    container_name: review-agent
-    env_file:
-      - .env
-    command: ["src.review_agent.cli", "--help"]
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount repos directory to persist cloned repositories
+      - ./repos:/app/repos
+    restart: unless-stopped
+    environment:
+      - REPOS_DIR=/app/repos
