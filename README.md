@@ -20,6 +20,7 @@
 ## Обзор проекта
 
 [Ссылка на задание](https://docs.google.com/document/d/1JIRdWHDSp1RsT7A0_wlADy_4lTHEg-DwoeIjSjB4MBo/edit?tab=t.0#heading=h.ess5k7fvs5zw)
+
 [Ссылка на питч](https://drive.google.com/file/d/1EbgpbNtI6KWY-YZNkeblTyDxq1YMztPB/view?usp=share_link)
 
 Разработана полноценная автоматизированная система для Software Development Lifecycle (SDLC) на базе LangChain, которая способна автономно решать задачи полного цикла разработки в GitHub:
