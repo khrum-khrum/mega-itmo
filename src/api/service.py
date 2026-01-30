@@ -20,6 +20,7 @@ class CodeAgentService:
         """Initialize the Code Agent service."""
         self.github_token = os.getenv("GITHUB_TOKEN")
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        print(self.openrouter_api_key)
         self.model = os.getenv("CODE_AGENT_MODEL", "llama-3.3-70b-versatile")
         self.repos_dir = os.getenv("REPOS_DIR", "./repos")
 
