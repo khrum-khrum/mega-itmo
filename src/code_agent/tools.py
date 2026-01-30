@@ -9,6 +9,147 @@ from typing import Annotated
 from langchain.tools import tool
 
 
+# Helper functions for search_code
+def _search_in_file(file_path: Path, pattern: str) -> list[str]:
+    """Search for pattern in a single file and return matches."""
+    matches = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                if re.search(pattern, line):
+                    matches.append(f"{file_path}:{line_num}: {line.strip()}")
+    except (UnicodeDecodeError, PermissionError):
+        pass
+    return matches
+
+
+def _format_search_results(matches: list[str], pattern: str, file_pattern: str) -> str:
+    """Format search results with optional truncation."""
+    if not matches:
+        return f"No matches found for pattern '{pattern}' in {file_pattern} files"
+
+    if len(matches) > 50:
+        return (
+            "Found matches:\n"
+            + "\n".join(matches[:50])
+            + f"\n... ({len(matches) - 50} more matches)"
+        )
+
+    return "Found matches:\n" + "\n".join(matches)
+
+
+# Helper functions for get_file_tree
+NON_ESSENTIAL_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "dist",
+    "build",
+    ".pytest_cache",
+}
+
+
+def _filter_tree_entries(entries: list[Path]) -> list[Path]:
+    """Filter out non-essential directories and hidden files."""
+    return [
+        e
+        for e in entries
+        if e.name not in NON_ESSENTIAL_DIRS and not e.name.startswith(".")
+    ]
+
+
+def _build_tree_recursive(
+    current_path: Path, prefix: str, depth: int, max_depth: int
+) -> list[str]:
+    """Recursively build tree structure."""
+    if depth > max_depth:
+        return []
+
+    items = []
+    try:
+        entries = sorted(current_path.iterdir(), key=lambda x: (not x.is_dir(), x.name))
+        entries = _filter_tree_entries(entries)
+
+        for i, entry in enumerate(entries):
+            is_last = i == len(entries) - 1
+            current_prefix = "└── " if is_last else "├── "
+            items.append(f"{prefix}{current_prefix}{entry.name}")
+
+            if entry.is_dir() and depth < max_depth:
+                extension = "    " if is_last else "│   "
+                items.extend(
+                    _build_tree_recursive(entry, prefix + extension, depth + 1, max_depth)
+                )
+    except PermissionError:
+        pass
+
+    return items
+
+
+# Helper functions for check_github_workflows
+def _resolve_commit_sha(commit_sha: str) -> str:
+    """Resolve commit SHA, handling 'HEAD' special case."""
+    if commit_sha.upper() != "HEAD":
+        return commit_sha
+
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Error getting current commit SHA: {result.stderr}")
+
+    return result.stdout.strip()
+
+
+def _get_github_client():
+    """Get GitHub client and validate required environment variables."""
+    repo_name = os.getenv("GITHUB_REPO")
+    token = os.getenv("GITHUB_TOKEN")
+
+    if not repo_name or not token:
+        raise ValueError("GITHUB_REPO and GITHUB_TOKEN environment variables must be set")
+
+    from src.utils.github_client import GitHubClient
+
+    return GitHubClient(token=token), repo_name
+
+
+def _format_workflow_status(workflows: dict, commit_sha: str) -> str:
+    """Format workflow status output."""
+    output_lines = [f"GitHub workflows status for commit {commit_sha[:8]}:\n"]
+
+    all_passed = True
+    for workflow_name, status in workflows.items():
+        if status == "success":
+            status_icon = "[PASS]"
+        elif status == "failure":
+            status_icon = "[FAIL]"
+            all_passed = False
+        elif status in ["in_progress", "queued"]:
+            status_icon = "[RUNNING]"
+            all_passed = False
+        else:
+            status_icon = "[UNKNOWN]"
+            all_passed = False
+
+        output_lines.append(f"{status_icon} {workflow_name}: {status}")
+
+    if all_passed:
+        output_lines.append("\nAll workflows passed successfully")
+    else:
+        output_lines.append(
+            "\nSome workflows failed or are still running. "
+            "You MUST fix any failures before completing the task."
+        )
+
+    return "\n".join(output_lines)
+
+
 @tool
 def read_file(file_path: Annotated[str, "Path to the file to read"]) -> str:
     """
@@ -103,31 +244,10 @@ def search_code(
 
         matches = []
         for file_path in path.rglob(file_pattern):
-            if file_path.is_file() and not any(
-                part.startswith(".") for part in file_path.parts
-            ):
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        for line_num, line in enumerate(f, 1):
-                            if re.search(pattern, line):
-                                matches.append(
-                                    f"{file_path}:{line_num}: {line.strip()}"
-                                )
-                except (UnicodeDecodeError, PermissionError):
-                    continue
+            if file_path.is_file() and not any(part.startswith(".") for part in file_path.parts):
+                matches.extend(_search_in_file(file_path, pattern))
 
-        if not matches:
-            return f"No matches found for pattern '{pattern}' in {file_pattern} files"
-
-        # Limit results to avoid overwhelming the LLM
-        if len(matches) > 50:
-            return (
-                "Found matches:\n"
-                + "\n".join(matches[:50])
-                + f"\n... ({len(matches) - 50} more matches)"
-            )
-
-        return "Found matches:\n" + "\n".join(matches)
+        return _format_search_results(matches, pattern, file_pattern)
     except Exception as e:
         return f"Error searching code: {str(e)}"
 
@@ -154,37 +274,7 @@ def get_file_tree(
         if not path.exists():
             return f"Error: Directory {directory} not found"
 
-        def build_tree(current_path: Path, prefix: str = "", depth: int = 0) -> list[str]:
-            if depth > max_depth:
-                return []
-
-            items = []
-            try:
-                entries = sorted(current_path.iterdir(), key=lambda x: (not x.is_dir(), x.name))
-                # Filter out common non-essential directories
-                entries = [
-                    e for e in entries
-                    if e.name not in {
-                        ".git", "node_modules", "__pycache__", "venv",
-                        ".venv", "dist", "build", ".pytest_cache"
-                    }
-                    and not e.name.startswith(".")
-                ]
-
-                for i, entry in enumerate(entries):
-                    is_last = i == len(entries) - 1
-                    current_prefix = "└── " if is_last else "├── "
-                    items.append(f"{prefix}{current_prefix}{entry.name}")
-
-                    if entry.is_dir() and depth < max_depth:
-                        extension = "    " if is_last else "│   "
-                        items.extend(build_tree(entry, prefix + extension, depth + 1))
-            except PermissionError:
-                pass
-
-            return items
-
-        tree_lines = [str(path) + "/"] + build_tree(path)
+        tree_lines = [str(path) + "/"] + _build_tree_recursive(path, "", 0, max_depth)
         return "\n".join(tree_lines)
     except Exception as e:
         return f"Error building tree: {str(e)}"
@@ -377,62 +467,15 @@ def check_github_workflows(
         Status of all workflows for the commit
     """
     try:
-        # Get current commit SHA if HEAD is requested
-        if commit_sha.upper() == "HEAD":
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                return f"Error getting current commit SHA: {result.stderr}"
-            commit_sha = result.stdout.strip()
+        resolved_sha = _resolve_commit_sha(commit_sha)
+        client, repo_name = _get_github_client()
 
-        # Get repo name and GitHub token from environment
-        repo_name = os.getenv("GITHUB_REPO")
-        token = os.getenv("GITHUB_TOKEN")
-
-        if not repo_name or not token:
-            return "Error: GITHUB_REPO and GITHUB_TOKEN environment variables must be set"
-
-        # Import here to avoid circular dependency
-        from src.utils.github_client import GitHubClient
-
-        client = GitHubClient(token=token)
-        workflows = client.get_workflow_runs_for_commit(repo_name, commit_sha)
+        workflows = client.get_workflow_runs_for_commit(repo_name, resolved_sha)
 
         if not workflows:
-            return f"No GitHub workflows found for commit {commit_sha[:8]}"
+            return f"No GitHub workflows found for commit {resolved_sha[:8]}"
 
-        # Format output
-        output_lines = [f"GitHub workflows status for commit {commit_sha[:8]}:\n"]
-
-        all_passed = True
-        for workflow_name, status in workflows.items():
-            if status == "success":
-                status_icon = "[PASS]"
-            elif status == "failure":
-                status_icon = "[FAIL]"
-                all_passed = False
-            elif status in ["in_progress", "queued"]:
-                status_icon = "[RUNNING]"
-                all_passed = False
-            else:
-                status_icon = "[UNKNOWN]"
-                all_passed = False
-
-            output_lines.append(f"{status_icon} {workflow_name}: {status}")
-
-        if all_passed:
-            output_lines.append("\nAll workflows passed successfully")
-        else:
-            output_lines.append(
-                "\nSome workflows failed or are still running. "
-                "You MUST fix any failures before completing the task."
-            )
-
-        return "\n".join(output_lines)
+        return _format_workflow_status(workflows, resolved_sha)
 
     except Exception as e:
         return f"Error checking GitHub workflows: {str(e)}"

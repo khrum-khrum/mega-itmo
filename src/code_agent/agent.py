@@ -7,6 +7,38 @@ from src.code_agent.tools import ALL_TOOLS
 from src.utils.github_client import GitHubClient, IssueData, PRData
 from src.utils.langchain_llm import LangChainAgent
 
+# Keywords for PR feedback analysis
+NEGATIVE_KEYWORDS = [
+    "fix",
+    "change",
+    "update",
+    "modify",
+    "incorrect",
+    "wrong",
+    "bug",
+    "issue",
+    "problem",
+    "should",
+    "need",
+    "must",
+    "please",
+    "todo",
+    "needs changes",
+    "requested changes",
+]
+
+POSITIVE_KEYWORDS = [
+    "lgtm",
+    "looks good",
+    "great",
+    "perfect",
+    "approved",
+    "ready to merge",
+    "well done",
+    "nice",
+    "good job",
+]
+
 
 @dataclass
 class AgentResult:
@@ -75,96 +107,32 @@ class CodeAgent:
             AgentResult with execution details
         """
         try:
-            # 1. Get Issue data
-            if verbose:
-                print(f"\nFetching Issue #{issue_number}...")
-            issue = self.github.get_issue(repo_name, issue_number)
+            # Fetch issue and PR data
+            issue, pr_data = self._fetch_issue_and_pr_data(
+                repo_name, issue_number, pr_number, verbose
+            )
 
-            # 2. Get PR data if working on existing PR
-            pr_data: PRData | None = None
-            if pr_number:
-                if verbose:
-                    print(f"\nFetching PR #{pr_number} with comments...")
-                pr_data = self.github.get_pr_data_with_comments(repo_name, pr_number)
-                if verbose:
-                    print(f"Found {len(pr_data.comments)} comments in PR")
-
-                # Check if changes are actually needed based on feedback
-                if not self._should_process_pr_feedback(pr_data, verbose):
-                    if verbose:
-                        print("\nNo changes needed - all feedback is positive")
-                    return AgentResult(
-                        success=True,
-                        output="No changes needed - PR feedback is positive",
-                        repo_path="",
-                        branch_name=pr_data.head_branch if pr_data else "",
-                    )
-
-            # 3. Clone repository (or checkout to PR branch if exists)
-            if verbose:
-                if pr_data:
-                    print(f"\nCloning repository and checking out PR branch '{pr_data.head_branch}'...")
-                else:
-                    print(f"\nCloning repository {repo_name}...")
-
-            # If we have PR data, clone and checkout to that branch
+            # Check if changes are needed for PR feedback
             if pr_data:
-                self.repo_path = self.github.clone_repository(repo_name, branch=pr_data.head_branch)
-            else:
-                self.repo_path = self.github.clone_repository(repo_name)
+                early_exit = self._check_if_changes_needed(pr_data, verbose)
+                if early_exit:
+                    return early_exit
 
-            if verbose:
-                print(f"Repository prepared at: {self.repo_path}")
+            # Prepare repository
+            self.repo_path = self._prepare_repository(repo_name, pr_data, verbose)
 
-            # 3. Change working directory to repo
-            original_dir = os.getcwd()
-            os.chdir(self.repo_path)
+            # Run agent analysis
+            result = self._run_agent_analysis(issue, repo_name, pr_data, verbose)
 
-            try:
-                # 4. Initialize LangChain agent with tools
-                if verbose:
-                    print(f"\nInitializing LangChain agent with {len(ALL_TOOLS)} tools...")
+            # Determine branch name
+            branch_name = pr_data.head_branch if pr_data else f"agent/issue-{issue_number}"
 
-                self.langchain_agent = LangChainAgent(
-                    tools=ALL_TOOLS,
-                    api_key=self.api_key,
-                    model=self.model,
-                )
-
-                # 5. Prepare issue description for the agent
-                issue_prompt = self._build_issue_prompt(issue, repo_name, pr_data)
-
-                # 6. Run the agent
-                if verbose:
-                    if pr_data:
-                        print(f"\nRunning agent to address PR feedback...\n")
-                    else:
-                        print(f"\nRunning agent to solve the issue...\n")
-                    print("=" * 60)
-
-                result = self.langchain_agent.run(issue_prompt)
-
-                if verbose:
-                    print("=" * 60)
-                    print(f"\nAgent finished execution\n")
-
-                # 7. Determine branch name
-                # If working on existing PR, use that branch; otherwise create new one
-                if pr_data:
-                    branch_name = pr_data.head_branch
-                else:
-                    branch_name = f"agent/issue-{issue_number}"
-
-                return AgentResult(
-                    success=True,
-                    output=result.get("output", ""),
-                    repo_path=self.repo_path,
-                    branch_name=branch_name,
-                )
-
-            finally:
-                # Always return to original directory
-                os.chdir(original_dir)
+            return AgentResult(
+                success=True,
+                output=result.get("output", ""),
+                repo_path=self.repo_path,
+                branch_name=branch_name,
+            )
 
         except Exception as e:
             return AgentResult(
@@ -174,6 +142,102 @@ class CodeAgent:
                 branch_name="",
                 error=str(e),
             )
+
+    def _fetch_issue_and_pr_data(
+        self,
+        repo_name: str,
+        issue_number: int,
+        pr_number: int | None,
+        verbose: bool,
+    ) -> tuple[IssueData, PRData | None]:
+        """Fetch issue data and optional PR data from GitHub."""
+        if verbose:
+            print(f"\nFetching Issue #{issue_number}...")
+        issue = self.github.get_issue(repo_name, issue_number)
+
+        pr_data = None
+        if pr_number:
+            if verbose:
+                print(f"\nFetching PR #{pr_number} with comments...")
+            pr_data = self.github.get_pr_data_with_comments(repo_name, pr_number)
+            if verbose:
+                print(f"Found {len(pr_data.comments)} comments in PR")
+
+        return issue, pr_data
+
+    def _check_if_changes_needed(
+        self, pr_data: PRData, verbose: bool
+    ) -> AgentResult | None:
+        """Check if PR feedback requires changes. Returns early exit result if no changes needed."""
+        if not self._should_process_pr_feedback(pr_data, verbose):
+            if verbose:
+                print("\nNo changes needed - all feedback is positive")
+            return AgentResult(
+                success=True,
+                output="No changes needed - PR feedback is positive",
+                repo_path="",
+                branch_name=pr_data.head_branch,
+            )
+        return None
+
+    def _prepare_repository(
+        self, repo_name: str, pr_data: PRData | None, verbose: bool
+    ) -> str:
+        """Clone repository and checkout appropriate branch."""
+        if verbose:
+            if pr_data:
+                print(
+                    f"\nCloning repository and checking out PR branch '{pr_data.head_branch}'..."
+                )
+            else:
+                print(f"\nCloning repository {repo_name}...")
+
+        if pr_data:
+            repo_path = self.github.clone_repository(repo_name, branch=pr_data.head_branch)
+        else:
+            repo_path = self.github.clone_repository(repo_name)
+
+        if verbose:
+            print(f"Repository prepared at: {repo_path}")
+
+        return repo_path
+
+    def _run_agent_analysis(
+        self, issue: IssueData, repo_name: str, pr_data: PRData | None, verbose: bool
+    ) -> dict:
+        """Initialize agent and run analysis within the repository directory."""
+        original_dir = os.getcwd()
+        os.chdir(self.repo_path)
+
+        try:
+            if verbose:
+                print(f"\nInitializing LangChain agent with {len(ALL_TOOLS)} tools...")
+
+            self.langchain_agent = LangChainAgent(
+                tools=ALL_TOOLS,
+                api_key=self.api_key,
+                model=self.model,
+            )
+
+            issue_prompt = self._build_issue_prompt(issue, repo_name, pr_data)
+
+            if verbose:
+                if pr_data:
+                    print(f"\nRunning agent to address PR feedback...\n")
+                else:
+                    print(f"\nRunning agent to solve the issue...\n")
+                print("=" * 60)
+
+            result = self.langchain_agent.run(issue_prompt)
+
+            if verbose:
+                print("=" * 60)
+                print(f"\nAgent finished execution\n")
+
+            return result
+
+        finally:
+            os.chdir(original_dir)
 
     def commit_and_push(
         self,
@@ -313,94 +377,76 @@ Closes #{issue_number}
                 print("  → No comments found, skipping changes")
             return False
 
-        # Keywords that indicate changes are needed
-        negative_keywords = [
-            "fix",
-            "change",
-            "update",
-            "modify",
-            "incorrect",
-            "wrong",
-            "bug",
-            "issue",
-            "problem",
-            "should",
-            "need",
-            "must",
-            "please",
-            "todo",
-            "needs changes",
-            "requested changes",
-        ]
+        # Analyze all comments and count feedback types
+        feedback_counts = self._count_feedback_types(pr_data.comments, verbose)
 
-        # Positive keywords that indicate approval
-        positive_keywords = [
-            "lgtm",
-            "looks good",
-            "great",
-            "perfect",
-            "approved",
-            "ready to merge",
-            "well done",
-            "nice",
-            "good job",
-        ]
+        # Make decision based on feedback analysis
+        return self._make_feedback_decision(feedback_counts, verbose)
 
-        has_changes_requested = False
-        has_approval = False
-        negative_comment_count = 0
-        positive_comment_count = 0
+    def _count_feedback_types(self, comments, verbose: bool) -> dict:
+        """Count different types of feedback in PR comments."""
+        counts = {
+            "has_changes_requested": False,
+            "has_approval": False,
+            "negative_count": 0,
+            "positive_count": 0,
+        }
 
-        for comment in pr_data.comments:
-            # Check review state
-            if comment.review_state == "CHANGES_REQUESTED":
-                has_changes_requested = True
-                if verbose:
-                    print(f"  → Found CHANGES_REQUESTED review from @{comment.author}")
+        for comment in comments:
+            self._analyze_comment_sentiment(comment, counts, verbose)
 
-            elif comment.review_state == "APPROVED":
-                has_approval = True
-                if verbose:
-                    print(f"  → Found APPROVED review from @{comment.author}")
+        return counts
 
-            # Analyze comment body for keywords
-            comment_body_lower = comment.body.lower()
+    def _analyze_comment_sentiment(self, comment, counts: dict, verbose: bool) -> None:
+        """Analyze a single comment for sentiment and review state."""
+        # Check review state
+        if comment.review_state == "CHANGES_REQUESTED":
+            counts["has_changes_requested"] = True
+            if verbose:
+                print(f"  → Found CHANGES_REQUESTED review from @{comment.author}")
 
-            # Check for negative keywords
-            if any(keyword in comment_body_lower for keyword in negative_keywords):
-                negative_comment_count += 1
-                if verbose:
-                    print(
-                        f"  → Found change request in comment from @{comment.author}: "
-                        f'"{comment.body[:60]}..."'
-                    )
+        elif comment.review_state == "APPROVED":
+            counts["has_approval"] = True
+            if verbose:
+                print(f"  → Found APPROVED review from @{comment.author}")
 
-            # Check for positive keywords
-            elif any(keyword in comment_body_lower for keyword in positive_keywords):
-                positive_comment_count += 1
-                if verbose:
-                    print(
-                        f"  → Found positive feedback from @{comment.author}: "
-                        f'"{comment.body[:60]}..."'
-                    )
+        # Analyze comment body for keywords
+        comment_body_lower = comment.body.lower()
 
-        # Decision logic
-        if has_changes_requested:
+        if any(keyword in comment_body_lower for keyword in NEGATIVE_KEYWORDS):
+            counts["negative_count"] += 1
+            if verbose:
+                print(
+                    f"  → Found change request in comment from @{comment.author}: "
+                    f'"{comment.body[:60]}..."'
+                )
+
+        elif any(keyword in comment_body_lower for keyword in POSITIVE_KEYWORDS):
+            counts["positive_count"] += 1
+            if verbose:
+                print(
+                    f"  → Found positive feedback from @{comment.author}: "
+                    f'"{comment.body[:60]}..."'
+                )
+
+    def _make_feedback_decision(self, counts: dict, verbose: bool) -> bool:
+        """Make decision about whether changes are needed based on feedback counts."""
+        if counts["has_changes_requested"]:
             if verbose:
                 print("  Changes are needed (CHANGES_REQUESTED state found)")
             return True
 
-        if negative_comment_count > 0:
+        if counts["negative_count"] > 0:
             if verbose:
-                print(f"  Changes are needed ({negative_comment_count} change request(s) found)")
+                print(f"  Changes are needed ({counts['negative_count']} change request(s) found)")
             return True
 
-        if has_approval and negative_comment_count == 0:
+        if counts["has_approval"] and counts["negative_count"] == 0:
             if verbose:
                 print("  No changes needed (PR is approved with no change requests)")
             return False
 
-        if positive_comment_count > 0 and negative_comment_count == 0:
+        if counts["positive_count"] > 0 and counts["negative_count"] == 0:
             if verbose:
                 print("  No changes needed (only positive feedback found)")
             return False
@@ -424,7 +470,21 @@ Closes #{issue_number}
         Returns:
             Formatted prompt
         """
-        prompt = f"""# GitHub Issue to Solve
+        prompt = self._build_issue_header(issue, repo_name)
+
+        if pr_data:
+            prompt += self._build_pr_feedback_section(pr_data)
+            prompt += self._build_task_instructions_for_pr()
+        else:
+            prompt += self._build_task_instructions_for_issue()
+
+        prompt += self._build_workflow_instructions()
+
+        return prompt
+
+    def _build_issue_header(self, issue: IssueData, repo_name: str) -> str:
+        """Build the issue header section of the prompt."""
+        return f"""# GitHub Issue to Solve
 
 **Repository:** {repo_name}
 **Issue #:** {issue.number}
@@ -438,9 +498,9 @@ Closes #{issue_number}
 {issue.body}
 """
 
-        # Add PR information and feedback if available
-        if pr_data:
-            prompt += f"""
+    def _build_pr_feedback_section(self, pr_data: PRData) -> str:
+        """Build the PR feedback section of the prompt."""
+        section = f"""
 
 ---
 
@@ -458,17 +518,21 @@ Closes #{issue_number}
 ### Feedback and Comments ({len(pr_data.comments)})
 
 """
-            if pr_data.comments:
-                for i, comment in enumerate(pr_data.comments, 1):
-                    prompt += f"""
+        if pr_data.comments:
+            for i, comment in enumerate(pr_data.comments, 1):
+                section += f"""
 **Comment {i}:**
 {str(comment)}
 
 """
-            else:
-                prompt += "No comments yet.\n"
+        else:
+            section += "No comments yet.\n"
 
-            prompt += """
+        return section
+
+    def _build_task_instructions_for_pr(self) -> str:
+        """Build task instructions for PR feedback mode."""
+        return """
 ---
 
 **Your task:** This PR already exists for the issue. Review the feedback and comments above, then make the necessary changes to address them. You are working on the existing branch, so your changes will be added as new commits to the PR.
@@ -480,8 +544,10 @@ Focus on:
 4. Improving code quality based on suggestions
 
 """
-        else:
-            prompt += """
+
+    def _build_task_instructions_for_issue(self) -> str:
+        """Build task instructions for new issue mode."""
+        return """
 
 ---
 
@@ -489,8 +555,9 @@ Focus on:
 
 """
 
-        # Common instructions for both cases
-        prompt += """
+    def _build_workflow_instructions(self) -> str:
+        """Build the workflow verification instructions section."""
+        return """
 You have access to tools for:
 - Exploring the repository structure
 - Reading and searching files
@@ -533,7 +600,6 @@ If workflows were passing before your changes, they MUST pass after your changes
 Failing workflows indicate that your code has issues that MUST be fixed.
 Do not consider the task complete until all workflows pass.
 """
-        return prompt
 
     def __enter__(self):
         """Context manager entry."""

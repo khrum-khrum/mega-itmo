@@ -6,6 +6,122 @@ from pathlib import Path
 from typing import Annotated
 
 from langchain.tools import tool
+import re
+
+
+# Helper functions for search_code_in_pr
+def _search_in_file_for_pr(file_path: Path, pattern: str) -> list[str]:
+    """Search for pattern in a single file and return matches."""
+    matches = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                if re.search(pattern, line):
+                    matches.append(f"{file_path}:{line_num}: {line.strip()}")
+    except (UnicodeDecodeError, PermissionError):
+        pass
+    return matches
+
+
+def _format_pr_search_results(matches: list[str], pattern: str, file_pattern: str) -> str:
+    """Format search results with optional truncation."""
+    if not matches:
+        return f"No matches found for pattern '{pattern}' in {file_pattern} files"
+
+    if len(matches) > 50:
+        return (
+            "Found matches:\n"
+            + "\n".join(matches[:50])
+            + f"\n... ({len(matches) - 50} more matches)"
+        )
+
+    return "Found matches:\n" + "\n".join(matches)
+
+
+# Helper functions for check_pr_workflows
+def _resolve_pr_commit_sha(commit_sha: str) -> str:
+    """Resolve commit SHA, handling 'HEAD' special case."""
+    if commit_sha.upper() != "HEAD":
+        return commit_sha
+
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Error getting current commit SHA: {result.stderr}")
+
+    return result.stdout.strip()
+
+
+def _get_pr_github_client():
+    """Get GitHub client and validate required environment variables."""
+    repo_name = os.getenv("GITHUB_REPO")
+    token = os.getenv("GITHUB_TOKEN")
+
+    if not repo_name or not token:
+        raise ValueError("GITHUB_REPO and GITHUB_TOKEN environment variables must be set")
+
+    from src.utils.github_client import GitHubClient
+
+    return GitHubClient(token=token), repo_name
+
+
+def _analyze_pr_workflow_status(workflows: dict) -> tuple[bool, bool, bool]:
+    """Analyze workflow status and return (all_passed, has_failures, has_pending)."""
+    all_passed = True
+    has_failures = False
+    has_pending = False
+
+    for status in workflows.values():
+        if status == "success":
+            continue
+        elif status == "failure":
+            all_passed = False
+            has_failures = True
+        elif status in ["in_progress", "queued"]:
+            all_passed = False
+            has_pending = True
+        else:
+            all_passed = False
+
+    return all_passed, has_failures, has_pending
+
+
+def _format_pr_workflow_output(
+    workflows: dict, commit_sha: str, all_passed: bool, has_failures: bool, has_pending: bool
+) -> str:
+    """Format PR workflow status output with detailed guidance."""
+    output_lines = [f"GitHub workflows status for PR commit {commit_sha[:8]}:\n"]
+
+    for workflow_name, status in workflows.items():
+        if status == "success":
+            status_icon = "[PASS]"
+        elif status == "failure":
+            status_icon = "[FAIL]"
+        elif status in ["in_progress", "queued"]:
+            status_icon = "[RUNNING]"
+        else:
+            status_icon = "[UNKNOWN]"
+
+        output_lines.append(f"{status_icon} {workflow_name}: {status}")
+
+    output_lines.append("")
+    if all_passed:
+        output_lines.append("All workflows passed successfully")
+        output_lines.append("PR can be approved (READY TO MERGE)")
+    elif has_failures:
+        output_lines.append("Some workflows FAILED")
+        output_lines.append("PR MUST NOT be approved (mark as NEEDS CHANGES)")
+        output_lines.append("The code has issues that must be fixed before merging.")
+    elif has_pending:
+        output_lines.append("Some workflows are still running")
+        output_lines.append("Wait for all workflows to complete before final assessment")
+        output_lines.append("PR should be marked as REQUIRES DISCUSSION until workflows complete")
+
+    return "\n".join(output_lines)
 
 
 @tool
@@ -55,8 +171,6 @@ def search_code_in_pr(
     Returns:
         List of matches with file paths and line numbers
     """
-    import re
-
     try:
         path = Path(directory)
         if not path.exists():
@@ -64,31 +178,10 @@ def search_code_in_pr(
 
         matches = []
         for file_path in path.rglob(file_pattern):
-            if file_path.is_file() and not any(
-                part.startswith(".") for part in file_path.parts
-            ):
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        for line_num, line in enumerate(f, 1):
-                            if re.search(pattern, line):
-                                matches.append(
-                                    f"{file_path}:{line_num}: {line.strip()}"
-                                )
-                except (UnicodeDecodeError, PermissionError):
-                    continue
+            if file_path.is_file() and not any(part.startswith(".") for part in file_path.parts):
+                matches.extend(_search_in_file_for_pr(file_path, pattern))
 
-        if not matches:
-            return f"No matches found for pattern '{pattern}' in {file_pattern} files"
-
-        # Limit results to avoid overwhelming the LLM
-        if len(matches) > 50:
-            return (
-                "Found matches:\n"
-                + "\n".join(matches[:50])
-                + f"\n... ({len(matches) - 50} more matches)"
-            )
-
-        return "Found matches:\n" + "\n".join(matches)
+        return _format_pr_search_results(matches, pattern, file_pattern)
     except Exception as e:
         return f"Error searching code: {str(e)}"
 
@@ -267,79 +360,20 @@ def check_pr_workflows(
         Status of all workflows for the commit
     """
     try:
-        import subprocess
+        resolved_sha = _resolve_pr_commit_sha(commit_sha)
+        client, repo_name = _get_pr_github_client()
 
-        # Get current commit SHA if HEAD is requested
-        if commit_sha.upper() == "HEAD":
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                return f"Error getting current commit SHA: {result.stderr}"
-            commit_sha = result.stdout.strip()
-
-        # Get repo name and GitHub token from environment
-        repo_name = os.getenv("GITHUB_REPO")
-        token = os.getenv("GITHUB_TOKEN")
-
-        if not repo_name or not token:
-            return "Error: GITHUB_REPO and GITHUB_TOKEN environment variables must be set"
-
-        # Import here to avoid circular dependency
-        from src.utils.github_client import GitHubClient
-
-        client = GitHubClient(token=token)
-        workflows = client.get_workflow_runs_for_commit(repo_name, commit_sha)
+        workflows = client.get_workflow_runs_for_commit(repo_name, resolved_sha)
 
         if not workflows:
-            return f"""No GitHub workflows found for commit {commit_sha[:8]}
+            return f"""No GitHub workflows found for commit {resolved_sha[:8]}
 
 ⚠️ WARNING: This repository may not have GitHub Actions workflows configured.
 If workflows should exist, this could indicate an issue with the PR.
 """
 
-        # Format output
-        output_lines = [f"GitHub workflows status for PR commit {commit_sha[:8]}:\n"]
-
-        all_passed = True
-        has_failures = False
-        has_pending = False
-
-        for workflow_name, status in workflows.items():
-            if status == "success":
-                status_icon = "[PASS]"
-            elif status == "failure":
-                status_icon = "[FAIL]"
-                all_passed = False
-                has_failures = True
-            elif status in ["in_progress", "queued"]:
-                status_icon = "[RUNNING]"
-                all_passed = False
-                has_pending = True
-            else:
-                status_icon = "[UNKNOWN]"
-                all_passed = False
-
-            output_lines.append(f"{status_icon} {workflow_name}: {status}")
-
-        # Provide clear guidance
-        output_lines.append("")
-        if all_passed:
-            output_lines.append("All workflows passed successfully")
-            output_lines.append("PR can be approved (READY TO MERGE)")
-        elif has_failures:
-            output_lines.append("Some workflows FAILED")
-            output_lines.append("PR MUST NOT be approved (mark as NEEDS CHANGES)")
-            output_lines.append("The code has issues that must be fixed before merging.")
-        elif has_pending:
-            output_lines.append("Some workflows are still running")
-            output_lines.append("Wait for all workflows to complete before final assessment")
-            output_lines.append("PR should be marked as REQUIRES DISCUSSION until workflows complete")
-
-        return "\n".join(output_lines)
+        all_passed, has_failures, has_pending = _analyze_pr_workflow_status(workflows)
+        return _format_pr_workflow_output(workflows, resolved_sha, all_passed, has_failures, has_pending)
 
     except Exception as e:
         return f"Error checking GitHub workflows: {str(e)}"

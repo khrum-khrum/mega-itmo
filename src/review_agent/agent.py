@@ -185,69 +185,21 @@ Be thorough, rigorous, and prioritize correctness over speed.
             ReviewResult with review details
         """
         try:
-            # 1. Get PR data and related issue
+            # Fetch PR data and related issue
             if verbose:
                 print(f"\nFetching Pull Request #{pr_number}...")
             pr_data, issue_details = self._fetch_pr_data(repo_name, pr_number)
 
             if verbose:
-                print(f"PR #{pr_data.number}: {pr_data.title}")
-                print(f"   Changed files: {len(pr_data.changed_files)}")
-                print(f"   +{pr_data.additions} -{pr_data.deletions}")
-                print(f"   Branch: {pr_data.head_branch} -> {pr_data.base_branch}")
-                if issue_details:
-                    print(f"   Related Issue: #{pr_data.issue_number}")
+                self._print_pr_info(pr_data, issue_details)
 
-            # 2. Clone repository and checkout PR branch
-            if verbose:
-                print(f"\nCloning repository {repo_name} (branch: {pr_data.head_branch})...")
-            self.repo_path = self.github.clone_repository(repo_name, branch=pr_data.head_branch)
+            # Clone and prepare repository
+            self.repo_path = self._clone_and_prepare_repo(repo_name, pr_data, verbose)
 
-            if verbose:
-                print(f"Repository cloned to: {self.repo_path}")
-                print(f"Checked out to PR branch: {pr_data.head_branch}")
+            # Run review agent
+            review_result = self._run_review_agent(pr_data, issue_details, verbose)
 
-            # 3. Change working directory to repo
-            original_dir = os.getcwd()
-            os.chdir(self.repo_path)
-
-            try:
-                # 4. Initialize LangChain agent with tools
-                if verbose:
-                    print(f"\nInitializing review agent with {len(ALL_REVIEW_TOOLS)} tools...")
-
-                self.langchain_agent = LangChainAgent(
-                    tools=ALL_REVIEW_TOOLS,
-                    api_key=self.api_key,
-                    model=self.model,
-                )
-
-                # Override system prompt for review agent
-                self.langchain_agent.agent = self._create_review_agent()
-
-                # 5. Prepare review prompt with issue details
-                review_prompt = self._build_review_prompt(pr_data, issue_details)
-
-                # 6. Run the agent
-                if verbose:
-                    print(f"\nRunning review agent...\n")
-                    print("=" * 60)
-
-                result = self.langchain_agent.run(review_prompt)
-
-                if verbose:
-                    print("=" * 60)
-                    print(f"\nReview agent finished\n")
-
-                # 7. Parse review result
-                review_output = result.get("output", "")
-                review_result = self._parse_review_output(review_output)
-
-                return review_result
-
-            finally:
-                # Always return to original directory
-                os.chdir(original_dir)
+            return review_result
 
         except Exception as e:
             return ReviewResult(
@@ -257,6 +209,70 @@ Be thorough, rigorous, and prioritize correctness over speed.
                 approved=False,
                 error=str(e),
             )
+
+    def _print_pr_info(self, pr_data: PRData, issue_details: str | None) -> None:
+        """Print PR information for verbose mode."""
+        print(f"PR #{pr_data.number}: {pr_data.title}")
+        print(f"   Changed files: {len(pr_data.changed_files)}")
+        print(f"   +{pr_data.additions} -{pr_data.deletions}")
+        print(f"   Branch: {pr_data.head_branch} -> {pr_data.base_branch}")
+        if issue_details:
+            print(f"   Related Issue: #{pr_data.issue_number}")
+
+    def _clone_and_prepare_repo(
+        self, repo_name: str, pr_data: PRData, verbose: bool
+    ) -> str:
+        """Clone repository and checkout PR branch."""
+        if verbose:
+            print(f"\nCloning repository {repo_name} (branch: {pr_data.head_branch})...")
+
+        repo_path = self.github.clone_repository(repo_name, branch=pr_data.head_branch)
+
+        if verbose:
+            print(f"Repository cloned to: {repo_path}")
+            print(f"Checked out to PR branch: {pr_data.head_branch}")
+
+        return repo_path
+
+    def _run_review_agent(
+        self, pr_data: PRData, issue_details: str | None, verbose: bool
+    ) -> ReviewResult:
+        """Initialize review agent and run analysis."""
+        original_dir = os.getcwd()
+        os.chdir(self.repo_path)
+
+        try:
+            if verbose:
+                print(f"\nInitializing review agent with {len(ALL_REVIEW_TOOLS)} tools...")
+
+            self.langchain_agent = LangChainAgent(
+                tools=ALL_REVIEW_TOOLS,
+                api_key=self.api_key,
+                model=self.model,
+            )
+
+            # Override system prompt for review agent
+            self.langchain_agent.agent = self._create_review_agent()
+
+            # Prepare review prompt with issue details
+            review_prompt = self._build_review_prompt(pr_data, issue_details)
+
+            if verbose:
+                print(f"\nRunning review agent...\n")
+                print("=" * 60)
+
+            result = self.langchain_agent.run(review_prompt)
+
+            if verbose:
+                print("=" * 60)
+                print(f"\nReview agent finished\n")
+
+            # Parse review result
+            review_output = result.get("output", "")
+            return self._parse_review_output(review_output)
+
+        finally:
+            os.chdir(original_dir)
 
     def submit_review(
         self,
@@ -338,15 +354,41 @@ Be thorough, rigorous, and prioritize correctness over speed.
         """
         pr = self.github.get_pull_request(repo_name, pr_number)
 
-        # Extract issue number from PR body or title
+        # Extract and fetch issue details
+        issue_number, issue_details = self._extract_issue_from_pr(repo_name, pr)
+
+        # Collect changed files and diff
+        changed_files, diff = self._collect_pr_changes(pr)
+
+        pr_data = PRData(
+            number=pr.number,
+            title=pr.title,
+            body=pr.body or "",
+            state=pr.state,
+            url=pr.html_url,
+            issue_number=issue_number,
+            changed_files=changed_files,
+            diff=diff,
+            commits_count=pr.commits,
+            additions=pr.additions,
+            deletions=pr.deletions,
+            head_branch=pr.head.ref,
+            base_branch=pr.base.ref,
+        )
+
+        return pr_data, issue_details
+
+    def _extract_issue_from_pr(self, repo_name: str, pr) -> tuple[int | None, str | None]:
+        """Extract issue number from PR and fetch issue details."""
+        import re
+
         issue_number = None
         issue_details = None
-        import re
+
         if pr.body:
             match = re.search(r"#(\d+)", pr.body)
             if match:
                 issue_number = int(match.group(1))
-                # Fetch the issue details
                 try:
                     issue = self.github.get_issue(repo_name, issue_number)
                     issue_details = f"""**Issue #{issue.number}: {issue.title}**
@@ -362,10 +404,12 @@ Be thorough, rigorous, and prioritize correctness over speed.
                 except Exception as e:
                     issue_details = f"Failed to fetch issue #{issue_number}: {str(e)}"
 
-        # Get changed files
+        return issue_number, issue_details
+
+    def _collect_pr_changes(self, pr) -> tuple[list[str], str]:
+        """Collect changed files and diff from PR."""
         changed_files = [f.filename for f in pr.get_files()]
 
-        # Get diff (limited to avoid overwhelming the LLM)
         diff_lines = []
         for file in pr.get_files():
             if file.patch:
@@ -373,23 +417,7 @@ Be thorough, rigorous, and prioritize correctness over speed.
                 diff_lines.append(file.patch[:1000])  # Limit patch size
         diff = "\n".join(diff_lines)
 
-        pr_data = PRData(
-            number=pr.number,
-            title=pr.title,
-            body=pr.body or "",
-            state=pr.state,
-            url=pr.html_url,
-            issue_number=issue_number,
-            changed_files=changed_files,
-            diff=diff,
-            commits_count=pr.commits,
-            additions=pr.additions,
-            deletions=pr.deletions,
-            head_branch=pr.head.ref,  # PR branch name
-            base_branch=pr.base.ref,  # Target branch name
-        )
-
-        return pr_data, issue_details
+        return changed_files, diff
 
     def _build_review_prompt(self, pr_data: PRData, issue_details: str | None = None) -> str:
         """
@@ -402,19 +430,16 @@ Be thorough, rigorous, and prioritize correctness over speed.
         Returns:
             Formatted prompt for review agent
         """
-        # Build issue section if available
-        issue_section = ""
-        if issue_details:
-            issue_section = f"""## Related Issue - REQUIREMENTS TO VERIFY
+        prompt = self._build_pr_header(pr_data)
+        prompt += self._build_issue_section(issue_details)
+        prompt += self._build_changes_summary(pr_data)
+        prompt += self._build_review_instructions()
 
-{issue_details}
+        return prompt
 
-**CRITICAL:** You MUST verify that the PR implementation addresses ALL requirements from the issue above.
-The PR should only be approved if it fully implements the issue requirements and the code works.
-
-"""
-
-        prompt = f"""# Pull Request to Review
+    def _build_pr_header(self, pr_data: PRData) -> str:
+        """Build PR header section of the review prompt."""
+        return f"""# Pull Request to Review
 
 **PR #:** {pr_data.number}
 **Title:** {pr_data.title}
@@ -427,9 +452,25 @@ The PR should only be approved if it fully implements the issue requirements and
 
 {pr_data.body}
 
-{issue_section}
+"""
 
-## Changes Summary
+    def _build_issue_section(self, issue_details: str | None) -> str:
+        """Build issue requirements section if available."""
+        if not issue_details:
+            return ""
+
+        return f"""## Related Issue - REQUIREMENTS TO VERIFY
+
+{issue_details}
+
+**CRITICAL:** You MUST verify that the PR implementation addresses ALL requirements from the issue above.
+The PR should only be approved if it fully implements the issue requirements and the code works.
+
+"""
+
+    def _build_changes_summary(self, pr_data: PRData) -> str:
+        """Build changes summary section."""
+        return f"""## Changes Summary
 
 - **Commits:** {pr_data.commits_count}
 - **Changed Files:** {len(pr_data.changed_files)}
@@ -450,7 +491,11 @@ The PR should only be approved if it fully implements the issue requirements and
 
 ---
 
-**Your task:** Review this Pull Request thoroughly and provide feedback.
+"""
+
+    def _build_review_instructions(self) -> str:
+        """Build review instructions section."""
+        return """**Your task:** Review this Pull Request thoroughly and provide feedback.
 
 **VERIFICATION CHECKLIST (MANDATORY):**
 1. **Issue Requirements:** Does the PR implement ALL requirements from the issue?
@@ -504,7 +549,6 @@ Provide your review in this format:
   Suggestion: [how to fix]
 ]
 """
-        return prompt
 
     def _create_review_agent(self):
         """
@@ -540,53 +584,10 @@ Provide your review in this format:
         Returns:
             Parsed ReviewResult
         """
-        # Simple parsing logic - check if ready to merge
         approved = "READY TO MERGE" in output and "NEEDS CHANGES" not in output
+        summary_parts = self._build_summary_parts(output)
 
-        # Build comprehensive summary including all sections
-        summary_parts = []
-
-        # Extract issue verification
-        if "**ISSUE VERIFICATION:**" in output:
-            issue_match = output.split("**ISSUE VERIFICATION:**")
-            if len(issue_match) > 1:
-                issue_part = issue_match[1].split("**")[0].strip()
-                summary_parts.append(f"**Issue Verification:**\n{issue_part}")
-
-        # Extract test results
-        if "**TESTS:**" in output:
-            test_match = output.split("**TESTS:**")
-            if len(test_match) > 1:
-                test_part = test_match[1].split("**")[0].strip()
-                summary_parts.append(f"\n**Tests:**\n{test_part}")
-
-        # Extract GitHub workflows section
-        if "**GITHUB WORKFLOWS:**" in output:
-            workflows_match = output.split("**GITHUB WORKFLOWS:**")
-            if len(workflows_match) > 1:
-                workflows_part = workflows_match[1].split("**")[0].strip()
-                summary_parts.append(f"\n**GitHub Workflows:**\n{workflows_part}")
-
-        # Extract summary
-        if "**SUMMARY:**" in output:
-            summary_match = output.split("**SUMMARY:**")
-            if len(summary_match) > 1:
-                summary_part = summary_match[1].split("**COMMENTS:**")[0].strip()
-                summary_parts.append(f"\n**Summary:**\n{summary_part}")
-
-        # Extract comments
-        if "**COMMENTS:**" in output:
-            comments_match = output.split("**COMMENTS:**")
-            if len(comments_match) > 1:
-                comments_part = comments_match[1].strip()
-                if comments_part:
-                    summary_parts.append(f"\n**Comments:**\n{comments_part}")
-
-        # Combine all parts or use fallback
-        if summary_parts:
-            full_summary = "\n".join(summary_parts)
-        else:
-            full_summary = output[:1000]  # Fallback to first 1000 chars
+        full_summary = "\n".join(summary_parts) if summary_parts else output[:1000]
 
         return ReviewResult(
             success=True,
@@ -594,6 +595,48 @@ Provide your review in this format:
             comments=[],  # Comments are included in summary for now
             approved=approved,
         )
+
+    def _build_summary_parts(self, output: str) -> list[str]:
+        """Build all summary parts from agent output."""
+        summary_parts = []
+
+        # Define sections to extract
+        sections = [
+            ("**ISSUE VERIFICATION:**", "**Issue Verification:**"),
+            ("**TESTS:**", "**Tests:**"),
+            ("**GITHUB WORKFLOWS:**", "**GitHub Workflows:**"),
+        ]
+
+        # Extract standard sections
+        for section_marker, section_label in sections:
+            content = self._extract_section(output, section_marker)
+            if content:
+                summary_parts.append(f"{section_label}\n{content}")
+
+        # Extract summary (special case - ends at COMMENTS)
+        if "**SUMMARY:**" in output:
+            summary_match = output.split("**SUMMARY:**")
+            if len(summary_match) > 1:
+                summary_part = summary_match[1].split("**COMMENTS:**")[0].strip()
+                summary_parts.append(f"\n**Summary:**\n{summary_part}")
+
+        # Extract comments
+        comments_content = self._extract_section(output, "**COMMENTS:**")
+        if comments_content:
+            summary_parts.append(f"\n**Comments:**\n{comments_content}")
+
+        return summary_parts
+
+    def _extract_section(self, output: str, section_marker: str) -> str:
+        """Extract a section from output based on marker."""
+        if section_marker not in output:
+            return ""
+
+        parts = output.split(section_marker)
+        if len(parts) > 1:
+            return parts[1].split("**")[0].strip()
+
+        return ""
 
     def _format_review_body(self, review_result: ReviewResult) -> str:
         """
