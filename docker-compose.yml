@@ -14,3 +14,20 @@ services:
     restart: unless-stopped
     environment:
       - REPOS_DIR=/app/repos
+
+  review-agent-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.review
+    container_name: review-agent-api
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    volumes:
+      # Mount repos directory to persist cloned repositories
+      - ./repos:/app/repos
+    restart: unless-stopped
+    environment:
+      - REPOS_DIR=/app/repos
+      - REVIEW_AGENT_EXECUTE=true
