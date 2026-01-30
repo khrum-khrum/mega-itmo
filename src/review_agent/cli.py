@@ -85,18 +85,18 @@ def main(
     """
     # Validate required parameters
     if not repo:
-        click.echo("❌ Error: --repo is required (or set GITHUB_REPO env var)", err=True)
+        click.echo("Error: --repo is required (or set GITHUB_REPO env var)", err=True)
         sys.exit(1)
 
     if not pr:
-        click.echo("❌ Error: --pr is required (or set PR_NUMBER env var)", err=True)
+        click.echo("Error: --pr is required (or set PR_NUMBER env var)", err=True)
         sys.exit(1)
 
-    click.echo("🔍 Review Agent starting...")
-    click.echo(f"   Repository: {repo}")
-    click.echo(f"   PR: #{pr}")
-    click.echo(f"   Model: {model}")
-    click.echo(f"   Mode: {'EXECUTE' if execute else 'DRY-RUN'}")
+    click.echo("Review Agent starting...")
+    click.echo(f"Repository: {repo}")
+    click.echo(f"PR: #{pr}")
+    click.echo(f"Model: {model}")
+    click.echo(f"Mode: {'EXECUTE' if execute else 'DRY-RUN'}")
     click.echo()
 
     try:
@@ -105,11 +105,11 @@ def main(
         api_key = os.getenv("OPENROUTER_API_KEY")
 
         if not github_token:
-            click.echo("❌ Error: GITHUB_TOKEN environment variable not set", err=True)
+            click.echo("Error: GITHUB_TOKEN environment variable not set", err=True)
             sys.exit(1)
 
         if not api_key:
-            click.echo("❌ Error: OPENROUTER_API_KEY environment variable not set", err=True)
+            click.echo("Error: OPENROUTER_API_KEY environment variable not set", err=True)
             sys.exit(1)
 
         # Set GITHUB_REPO env var for tools to access
@@ -127,14 +127,14 @@ def main(
             )
 
             if not result.success:
-                click.echo(f"\n❌ Review failed: {result.error}", err=True)
+                click.echo(f"\nReview failed: {result.error}", err=True)
                 sys.exit(1)
 
             # 2. Display review result
             click.echo("\n" + "=" * 60)
-            click.echo("📋 REVIEW RESULT")
+            click.echo("REVIEW RESULT")
             click.echo("=" * 60)
-            click.echo(f"\n{'✅ APPROVED' if result.approved else '⚠️  CHANGES REQUESTED'}")
+            click.echo(f"\n{'APPROVED' if result.approved else 'CHANGES REQUESTED'}")
             click.echo(f"\n{result.review_summary}")
             click.echo("\n" + "=" * 60)
 
@@ -146,18 +146,18 @@ def main(
                     review_result=result,
                     verbose=verbose,
                 )
-                click.echo(f"\n✅ Review submitted: {review_url}")
+                click.echo(f"\nReview submitted: {review_url}")
             else:
-                click.echo("\n⚠️  Dry-run mode: Review not submitted to GitHub")
-                click.echo("   Use --execute to submit the review")
+                click.echo("\nDry-run mode: Review not submitted to GitHub")
+                click.echo("Use --execute to submit the review")
 
-            click.echo("\n✅ Review Agent completed successfully!")
+            click.echo("\nReview Agent completed successfully")
 
     except KeyboardInterrupt:
-        click.echo("\n\n⚠️  Interrupted by user", err=True)
+        click.echo("\n\nInterrupted by user", err=True)
         sys.exit(130)
     except Exception as e:
-        click.echo(f"\n❌ Error: {str(e)}", err=True)
+        click.echo(f"\nError: {str(e)}", err=True)
         if verbose:
             import traceback
             traceback.print_exc()

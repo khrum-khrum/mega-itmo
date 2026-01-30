@@ -81,7 +81,7 @@ class ReviewAgentService:
                     review_result=result,
                     verbose=True,
                 )
-                logger.info(f"✅ Successfully submitted review for PR #{pr_number}")
+                logger.info(f"Successfully submitted review for PR #{pr_number}")
             else:
                 logger.info(
                     f"Dry-run mode: Review not submitted to GitHub. "

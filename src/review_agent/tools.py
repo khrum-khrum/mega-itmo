@@ -309,35 +309,34 @@ If workflows should exist, this could indicate an issue with the PR.
         has_pending = False
 
         for workflow_name, status in workflows.items():
-            # Determine status emoji
             if status == "success":
-                emoji = "✅"
+                status_icon = "[PASS]"
             elif status == "failure":
-                emoji = "❌"
+                status_icon = "[FAIL]"
                 all_passed = False
                 has_failures = True
             elif status in ["in_progress", "queued"]:
-                emoji = "⏳"
+                status_icon = "[RUNNING]"
                 all_passed = False
                 has_pending = True
             else:
-                emoji = "⚠️"
+                status_icon = "[UNKNOWN]"
                 all_passed = False
 
-            output_lines.append(f"{emoji} {workflow_name}: {status}")
+            output_lines.append(f"{status_icon} {workflow_name}: {status}")
 
         # Provide clear guidance
         output_lines.append("")
         if all_passed:
-            output_lines.append("✅ All workflows passed successfully!")
-            output_lines.append("✅ PR can be approved (READY TO MERGE)")
+            output_lines.append("All workflows passed successfully")
+            output_lines.append("PR can be approved (READY TO MERGE)")
         elif has_failures:
-            output_lines.append("❌ Some workflows FAILED!")
-            output_lines.append("❌ PR MUST NOT be approved (mark as NEEDS CHANGES)")
+            output_lines.append("Some workflows FAILED")
+            output_lines.append("PR MUST NOT be approved (mark as NEEDS CHANGES)")
             output_lines.append("The code has issues that must be fixed before merging.")
         elif has_pending:
-            output_lines.append("⏳ Some workflows are still running...")
-            output_lines.append("⚠️ Wait for all workflows to complete before final assessment")
+            output_lines.append("Some workflows are still running")
+            output_lines.append("Wait for all workflows to complete before final assessment")
             output_lines.append("PR should be marked as REQUIRES DISCUSSION until workflows complete")
 
         return "\n".join(output_lines)

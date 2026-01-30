@@ -109,21 +109,21 @@ def main(
     if execute:
         dry_run = False
 
-    click.echo("🤖 LangChain Code Agent")
-    click.echo(f"   Repository: {repo}")
-    click.echo(f"   Issue: #{issue}")
+    click.echo("LangChain Code Agent")
+    click.echo(f"Repository: {repo}")
+    click.echo(f"Issue: #{issue}")
     if pr:
-        click.echo(f"   PR: #{pr} (existing PR - will add commits)")
-    click.echo(f"   Model: {model}")
+        click.echo(f"PR: #{pr} (existing PR - will add commits)")
+    click.echo(f"Model: {model}")
     click.echo()
 
     # Initialize GitHub client
     try:
         github_client = GitHubClient(token=token, repos_dir=repos_dir)
         if verbose:
-            click.echo(f"✅ GitHub client initialized (repos directory: {repos_dir})")
+            click.echo(f"GitHub client initialized (repos directory: {repos_dir})")
     except ValueError as e:
-        click.echo(f"❌ GitHub client error: {e}", err=True)
+        click.echo(f"Error: GitHub client error: {e}", err=True)
         sys.exit(1)
 
     # Initialize Code Agent
@@ -134,16 +134,16 @@ def main(
             api_key=api_key,
         )
         if verbose:
-            click.echo(f"✅ Code Agent initialized")
+            click.echo(f"Code Agent initialized")
     except ValueError as e:
-        click.echo(f"❌ Code Agent error: {e}", err=True)
+        click.echo(f"Error: Code Agent error: {e}", err=True)
         sys.exit(1)
 
     # Use context manager for automatic cleanup
     with agent:
         # Analyze and solve the issue
         click.echo(f"\n{'='*60}")
-        click.echo(f"🔍 Analyzing Issue #{issue}")
+        click.echo(f"Analyzing Issue #{issue}")
         click.echo(f"{'='*60}\n")
 
         try:
@@ -154,16 +154,16 @@ def main(
                 verbose=verbose,
             )
         except Exception as e:
-            click.echo(f"\n❌ Error during analysis: {e}", err=True)
+            click.echo(f"\nError during analysis: {e}", err=True)
             sys.exit(1)
 
         if not result.success:
-            click.echo(f"\n❌ Agent execution failed: {result.error}", err=True)
+            click.echo(f"\nError: Agent execution failed: {result.error}", err=True)
             sys.exit(1)
 
         # Display results
         click.echo(f"\n{'='*60}")
-        click.echo("📦 SOLUTION")
+        click.echo("SOLUTION")
         click.echo(f"{'='*60}\n")
         click.echo(result.output)
         click.echo()
@@ -171,23 +171,23 @@ def main(
         # Check if agent decided no changes are needed
         if not result.repo_path or "No changes needed" in result.output:
             click.echo(f"{'─'*60}")
-            click.echo("✨ No changes needed - PR feedback is positive!")
+            click.echo("No changes needed - PR feedback is positive")
             if pr:
                 existing_pr = agent.github.get_pull_request(repo, pr)
-                click.echo(f"🔗 {existing_pr.html_url}")
+                click.echo(f"PR: {existing_pr.html_url}")
             click.echo(f"{'─'*60}")
             return
 
         if dry_run:
             click.echo(f"{'─'*60}")
-            click.echo("ℹ️  DRY-RUN MODE: Changes not pushed")
-            click.echo(f"   Repository cloned to: {result.repo_path}")
-            click.echo("   Review changes manually or use --execute to create PR")
+            click.echo("DRY-RUN MODE: Changes not pushed")
+            click.echo(f"Repository cloned to: {result.repo_path}")
+            click.echo("Review changes manually or use --execute to create PR")
             click.echo(f"{'─'*60}")
         else:
             # Execute mode: commit, push, and create PR
             click.echo(f"\n{'='*60}")
-            click.echo("🚀 CREATING PULL REQUEST")
+            click.echo("CREATING PULL REQUEST")
             click.echo(f"{'='*60}\n")
 
             # Get commit message
@@ -205,8 +205,8 @@ def main(
                 if pr:
                     # PR already exists, just show the URL
                     existing_pr = agent.github.get_pull_request(repo, pr)
-                    click.echo(f"\n✅ Changes pushed to existing Pull Request!")
-                    click.echo(f"🔗 {existing_pr.html_url}")
+                    click.echo(f"\nChanges pushed to existing Pull Request")
+                    click.echo(f"PR: {existing_pr.html_url}")
                 else:
                     # Create new PR
                     pr_url = agent.create_pull_request(
@@ -216,11 +216,11 @@ def main(
                         verbose=verbose,
                     )
 
-                    click.echo(f"\n✅ Pull Request created successfully!")
-                    click.echo(f"🔗 {pr_url}")
+                    click.echo(f"\nPull Request created successfully")
+                    click.echo(f"PR: {pr_url}")
 
             except RuntimeError as e:
-                click.echo(f"\n❌ Error creating PR: {e}", err=True)
+                click.echo(f"\nError creating PR: {e}", err=True)
                 sys.exit(1)
 
 

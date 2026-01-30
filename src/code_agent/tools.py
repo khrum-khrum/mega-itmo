@@ -65,7 +65,7 @@ def list_directory(
         for item in sorted(path.iterdir()):
             if item.name.startswith("."):
                 continue
-            icon = "📁" if item.is_dir() else "📄"
+            icon = "[DIR]" if item.is_dir() else "[FILE]"
             items.append(f"{icon} {item.name}")
 
         if not items:
@@ -410,26 +410,25 @@ def check_github_workflows(
 
         all_passed = True
         for workflow_name, status in workflows.items():
-            # Determine status emoji
             if status == "success":
-                emoji = "✅"
+                status_icon = "[PASS]"
             elif status == "failure":
-                emoji = "❌"
+                status_icon = "[FAIL]"
                 all_passed = False
             elif status in ["in_progress", "queued"]:
-                emoji = "⏳"
+                status_icon = "[RUNNING]"
                 all_passed = False
             else:
-                emoji = "⚠️"
+                status_icon = "[UNKNOWN]"
                 all_passed = False
 
-            output_lines.append(f"{emoji} {workflow_name}: {status}")
+            output_lines.append(f"{status_icon} {workflow_name}: {status}")
 
         if all_passed:
-            output_lines.append("\n✅ All workflows passed successfully!")
+            output_lines.append("\nAll workflows passed successfully")
         else:
             output_lines.append(
-                "\n⚠️ Some workflows failed or are still running. "
+                "\nSome workflows failed or are still running. "
                 "You MUST fix any failures before completing the task."
             )
 

@@ -77,22 +77,22 @@ class CodeAgent:
         try:
             # 1. Get Issue data
             if verbose:
-                print(f"\n📋 Fetching Issue #{issue_number}...")
+                print(f"\nFetching Issue #{issue_number}...")
             issue = self.github.get_issue(repo_name, issue_number)
 
             # 2. Get PR data if working on existing PR
             pr_data: PRData | None = None
             if pr_number:
                 if verbose:
-                    print(f"\n💬 Fetching PR #{pr_number} with comments...")
+                    print(f"\nFetching PR #{pr_number} with comments...")
                 pr_data = self.github.get_pr_data_with_comments(repo_name, pr_number)
                 if verbose:
-                    print(f"✅ Found {len(pr_data.comments)} comments in PR")
+                    print(f"Found {len(pr_data.comments)} comments in PR")
 
                 # Check if changes are actually needed based on feedback
                 if not self._should_process_pr_feedback(pr_data, verbose):
                     if verbose:
-                        print("\n✨ No changes needed - all feedback is positive!")
+                        print("\nNo changes needed - all feedback is positive")
                     return AgentResult(
                         success=True,
                         output="No changes needed - PR feedback is positive",
@@ -103,9 +103,9 @@ class CodeAgent:
             # 3. Clone repository (or checkout to PR branch if exists)
             if verbose:
                 if pr_data:
-                    print(f"\n📦 Cloning repository and checking out PR branch '{pr_data.head_branch}'...")
+                    print(f"\nCloning repository and checking out PR branch '{pr_data.head_branch}'...")
                 else:
-                    print(f"\n📦 Cloning repository {repo_name}...")
+                    print(f"\nCloning repository {repo_name}...")
 
             # If we have PR data, clone and checkout to that branch
             if pr_data:
@@ -114,7 +114,7 @@ class CodeAgent:
                 self.repo_path = self.github.clone_repository(repo_name)
 
             if verbose:
-                print(f"✅ Repository prepared at: {self.repo_path}")
+                print(f"Repository prepared at: {self.repo_path}")
 
             # 3. Change working directory to repo
             original_dir = os.getcwd()
@@ -123,7 +123,7 @@ class CodeAgent:
             try:
                 # 4. Initialize LangChain agent with tools
                 if verbose:
-                    print(f"\n🤖 Initializing LangChain agent with {len(ALL_TOOLS)} tools...")
+                    print(f"\nInitializing LangChain agent with {len(ALL_TOOLS)} tools...")
 
                 self.langchain_agent = LangChainAgent(
                     tools=ALL_TOOLS,
@@ -137,16 +137,16 @@ class CodeAgent:
                 # 6. Run the agent
                 if verbose:
                     if pr_data:
-                        print(f"\n🧠 Running agent to address PR feedback...\n")
+                        print(f"\nRunning agent to address PR feedback...\n")
                     else:
-                        print(f"\n🧠 Running agent to solve the issue...\n")
+                        print(f"\nRunning agent to solve the issue...\n")
                     print("=" * 60)
 
                 result = self.langchain_agent.run(issue_prompt)
 
                 if verbose:
                     print("=" * 60)
-                    print(f"\n✅ Agent finished execution\n")
+                    print(f"\nAgent finished execution\n")
 
                 # 7. Determine branch name
                 # If working on existing PR, use that branch; otherwise create new one
@@ -196,7 +196,7 @@ class CodeAgent:
             raise RuntimeError(f"Cannot commit failed execution: {result.error}")
 
         if verbose:
-            print(f"\n📝 Committing and pushing changes to branch '{result.branch_name}'...")
+            print(f"\nCommitting and pushing changes to branch '{result.branch_name}'...")
 
         try:
             has_changes = self.github.commit_and_push_changes(
@@ -207,10 +207,10 @@ class CodeAgent:
 
             if has_changes:
                 if verbose:
-                    print(f"✅ Changes pushed to {result.branch_name}")
+                    print(f"Changes pushed to {result.branch_name}")
             else:
                 if verbose:
-                    print(f"ℹ️  No changes to commit - PR is already in good state")
+                    print(f"No changes to commit - PR is already in good state")
 
         except Exception as e:
             raise RuntimeError(f"Failed to commit and push: {str(e)}") from e
@@ -241,7 +241,7 @@ class CodeAgent:
             raise RuntimeError(f"Cannot create PR for failed execution: {result.error}")
 
         if verbose:
-            print(f"\n🚀 Creating Pull Request...")
+            print(f"\nCreating Pull Request...")
 
         try:
             issue = self.github.get_issue(repo_name, issue_number)
@@ -258,7 +258,7 @@ class CodeAgent:
 
 Closes #{issue_number}
 
-*🤖 Этот Pull Request был автоматически создан Code Agent с использованием LangChain*
+*Этот Pull Request был автоматически создан Code Agent с использованием LangChain*
 """
 
             pr = self.github.create_pull_request(
@@ -269,7 +269,7 @@ Closes #{issue_number}
             )
 
             if verbose:
-                print(f"✅ Pull Request created: {pr.html_url}")
+                print(f"Pull Request created: {pr.html_url}")
 
             return pr.html_url
 
@@ -284,7 +284,7 @@ Closes #{issue_number}
             verbose: Whether to print verbose output
         """
         if verbose and self.repo_path:
-            print(f"\n✅ Repository preserved at: {self.repo_path}")
+            print(f"\nRepository preserved at: {self.repo_path}")
         self.repo_path = None
 
     def _should_process_pr_feedback(self, pr_data: PRData, verbose: bool = False) -> bool:
@@ -387,27 +387,27 @@ Closes #{issue_number}
         # Decision logic
         if has_changes_requested:
             if verbose:
-                print("  ✅ Changes are needed (CHANGES_REQUESTED state found)")
+                print("  Changes are needed (CHANGES_REQUESTED state found)")
             return True
 
         if negative_comment_count > 0:
             if verbose:
-                print(f"  ✅ Changes are needed ({negative_comment_count} change request(s) found)")
+                print(f"  Changes are needed ({negative_comment_count} change request(s) found)")
             return True
 
         if has_approval and negative_comment_count == 0:
             if verbose:
-                print("  ⏭️  No changes needed (PR is approved with no change requests)")
+                print("  No changes needed (PR is approved with no change requests)")
             return False
 
         if positive_comment_count > 0 and negative_comment_count == 0:
             if verbose:
-                print("  ⏭️  No changes needed (only positive feedback found)")
+                print("  No changes needed (only positive feedback found)")
             return False
 
         # Default: if unclear, process to be safe
         if verbose:
-            print("  ⚠️  Unclear feedback, processing to be safe")
+            print("  Unclear feedback, processing to be safe")
         return True
 
     def _build_issue_prompt(
