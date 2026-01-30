@@ -22,6 +22,11 @@ from src.utils.github_client import GitHubClient
     help="Issue number to solve",
 )
 @click.option(
+    "--pr",
+    type=int,
+    help="Pull Request number (if working on existing PR for the issue)",
+)
+@click.option(
     "--token",
     envvar="GITHUB_TOKEN",
     help="GitHub Personal Access Token",
@@ -64,6 +69,7 @@ from src.utils.github_client import GitHubClient
 def main(
     repo: str,
     issue: int,
+    pr: int | None,
     token: str | None,
     api_key: str | None,
     model: str,
@@ -90,6 +96,9 @@ def main(
         # Create PR automatically
         python -m src.code_agent.cli --repo owner/repo --issue 1 --execute
 
+        # Work on existing PR (address feedback)
+        python -m src.code_agent.cli --repo owner/repo --issue 1 --pr 456 --execute
+
         # Custom repos directory
         python -m src.code_agent.cli --repo owner/repo --issue 1 \\
             --repos-dir /path/to/repos
@@ -102,6 +111,9 @@ def main(
 
     click.echo("🤖 LangChain Code Agent")
     click.echo(f"   Repository: {repo}")
+    click.echo(f"   Issue: #{issue}")
+    if pr:
+        click.echo(f"   PR: #{pr} (existing PR - will add commits)")
     click.echo(f"   Model: {model}")
     click.echo()
 
@@ -138,6 +150,7 @@ def main(
             result = agent.analyze_and_solve_issue(
                 repo_name=repo,
                 issue_number=issue,
+                pr_number=pr,
                 verbose=verbose,
             )
         except Exception as e:
@@ -178,16 +191,23 @@ def main(
                     verbose=verbose,
                 )
 
-                # Create PR
-                pr_url = agent.create_pull_request(
-                    repo_name=repo,
-                    issue_number=issue,
-                    result=result,
-                    verbose=verbose,
-                )
+                # Create or update PR
+                if pr:
+                    # PR already exists, just show the URL
+                    existing_pr = agent.github.get_pull_request(repo, pr)
+                    click.echo(f"\n✅ Changes pushed to existing Pull Request!")
+                    click.echo(f"🔗 {existing_pr.html_url}")
+                else:
+                    # Create new PR
+                    pr_url = agent.create_pull_request(
+                        repo_name=repo,
+                        issue_number=issue,
+                        result=result,
+                        verbose=verbose,
+                    )
 
-                click.echo(f"\n✅ Pull Request created successfully!")
-                click.echo(f"🔗 {pr_url}")
+                    click.echo(f"\n✅ Pull Request created successfully!")
+                    click.echo(f"🔗 {pr_url}")
 
             except RuntimeError as e:
                 click.echo(f"\n❌ Error creating PR: {e}", err=True)

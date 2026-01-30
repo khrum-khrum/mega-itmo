@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 
 from src.code_agent.tools import ALL_TOOLS
-from src.utils.github_client import GitHubClient, IssueData
+from src.utils.github_client import GitHubClient, IssueData, PRData
 from src.utils.langchain_llm import LangChainAgent
 
 
@@ -54,14 +54,21 @@ class CodeAgent:
         self,
         repo_name: str,
         issue_number: int,
+        pr_number: int | None = None,
         verbose: bool = False,
     ) -> AgentResult:
         """
         Analyze a GitHub Issue and generate a solution.
 
+        If pr_number is provided, works on existing PR by:
+        - Fetching all PR comments and feedback
+        - Checking out the existing PR branch
+        - Including feedback in the agent prompt
+
         Args:
             repo_name: Repository name (owner/repo)
             issue_number: Issue number
+            pr_number: Pull Request number (optional, for existing PRs)
             verbose: Whether to print verbose output
 
         Returns:
@@ -73,13 +80,30 @@ class CodeAgent:
                 print(f"\n📋 Fetching Issue #{issue_number}...")
             issue = self.github.get_issue(repo_name, issue_number)
 
-            # 2. Clone repository
+            # 2. Get PR data if working on existing PR
+            pr_data: PRData | None = None
+            if pr_number:
+                if verbose:
+                    print(f"\n💬 Fetching PR #{pr_number} with comments...")
+                pr_data = self.github.get_pr_data_with_comments(repo_name, pr_number)
+                if verbose:
+                    print(f"✅ Found {len(pr_data.comments)} comments in PR")
+
+            # 3. Clone repository (or checkout to PR branch if exists)
             if verbose:
-                print(f"\n📦 Cloning repository {repo_name}...")
-            self.repo_path = self.github.clone_repository(repo_name)
+                if pr_data:
+                    print(f"\n📦 Cloning repository and checking out PR branch '{pr_data.head_branch}'...")
+                else:
+                    print(f"\n📦 Cloning repository {repo_name}...")
+
+            # If we have PR data, clone and checkout to that branch
+            if pr_data:
+                self.repo_path = self.github.clone_repository(repo_name, branch=pr_data.head_branch)
+            else:
+                self.repo_path = self.github.clone_repository(repo_name)
 
             if verbose:
-                print(f"✅ Repository cloned to: {self.repo_path}")
+                print(f"✅ Repository prepared at: {self.repo_path}")
 
             # 3. Change working directory to repo
             original_dir = os.getcwd()
@@ -97,11 +121,14 @@ class CodeAgent:
                 )
 
                 # 5. Prepare issue description for the agent
-                issue_prompt = self._build_issue_prompt(issue, repo_name)
+                issue_prompt = self._build_issue_prompt(issue, repo_name, pr_data)
 
                 # 6. Run the agent
                 if verbose:
-                    print(f"\n🧠 Running agent to solve the issue...\n")
+                    if pr_data:
+                        print(f"\n🧠 Running agent to address PR feedback...\n")
+                    else:
+                        print(f"\n🧠 Running agent to solve the issue...\n")
                     print("=" * 60)
 
                 result = self.langchain_agent.run(issue_prompt)
@@ -110,8 +137,12 @@ class CodeAgent:
                     print("=" * 60)
                     print(f"\n✅ Agent finished execution\n")
 
-                # 7. Create branch name
-                branch_name = f"agent/issue-{issue_number}"
+                # 7. Determine branch name
+                # If working on existing PR, use that branch; otherwise create new one
+                if pr_data:
+                    branch_name = pr_data.head_branch
+                else:
+                    branch_name = f"agent/issue-{issue_number}"
 
                 return AgentResult(
                     success=True,
@@ -241,13 +272,16 @@ Closes #{issue_number}
             print(f"\n✅ Repository preserved at: {self.repo_path}")
         self.repo_path = None
 
-    def _build_issue_prompt(self, issue: IssueData, repo_name: str) -> str:
+    def _build_issue_prompt(
+        self, issue: IssueData, repo_name: str, pr_data: PRData | None = None
+    ) -> str:
         """
         Build a detailed prompt for the agent from the Issue data.
 
         Args:
             issue: Issue data
             repo_name: Repository name
+            pr_data: Pull Request data with comments (if working on existing PR)
 
         Returns:
             Formatted prompt
@@ -264,11 +298,61 @@ Closes #{issue_number}
 ## Description
 
 {issue.body}
+"""
+
+        # Add PR information and feedback if available
+        if pr_data:
+            prompt += f"""
+
+---
+
+## Existing Pull Request
+
+**PR #{pr_data.number}:** {pr_data.title}
+**Status:** {pr_data.state}
+**Branch:** {pr_data.head_branch} -> {pr_data.base_branch}
+**URL:** {pr_data.url}
+
+### PR Description
+
+{pr_data.body}
+
+### Feedback and Comments ({len(pr_data.comments)})
+
+"""
+            if pr_data.comments:
+                for i, comment in enumerate(pr_data.comments, 1):
+                    prompt += f"""
+**Comment {i}:**
+{str(comment)}
+
+"""
+            else:
+                prompt += "No comments yet.\n"
+
+            prompt += """
+---
+
+**Your task:** This PR already exists for the issue. Review the feedback and comments above, then make the necessary changes to address them. You are working on the existing branch, so your changes will be added as new commits to the PR.
+
+Focus on:
+1. Understanding the feedback from reviewers
+2. Addressing all requested changes
+3. Fixing any issues or bugs mentioned
+4. Improving code quality based on suggestions
+
+"""
+        else:
+            prompt += """
 
 ---
 
 **Your task:** Analyze this issue and implement a solution by modifying the code in the repository.
 
+"""
+
+        # Common instructions for both cases
+        prompt += """
 You have access to tools for:
 - Exploring the repository structure
 - Reading and searching files

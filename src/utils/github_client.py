@@ -37,6 +37,62 @@ class IssueData:
         )
 
 
+@dataclass
+class PRCommentData:
+    """Single comment from a Pull Request."""
+
+    author: str
+    body: str
+    comment_type: str  # "review_comment", "issue_comment", or "review"
+    created_at: str
+    path: str | None = None  # File path for review comments
+    line: int | None = None  # Line number for review comments
+    review_state: str | None = None  # APPROVED, CHANGES_REQUESTED, COMMENTED for reviews
+
+    def __str__(self) -> str:
+        location = ""
+        if self.path and self.line:
+            location = f" [{self.path}:{self.line}]"
+        elif self.path:
+            location = f" [{self.path}]"
+
+        state_info = ""
+        if self.review_state:
+            state_info = f" ({self.review_state})"
+
+        return (
+            f"[{self.comment_type}{state_info}] @{self.author}{location} "
+            f"at {self.created_at}:\n{self.body}"
+        )
+
+
+@dataclass
+class PRData:
+    """Parsed GitHub Pull Request data."""
+
+    number: int
+    title: str
+    body: str
+    state: str
+    url: str
+    head_branch: str
+    base_branch: str
+    comments: list[PRCommentData]
+
+    def __str__(self) -> str:
+        comments_str = "\n\n".join(str(c) for c in self.comments) if self.comments else "No comments"
+        return (
+            f"Pull Request #{self.number}: {self.title}\n"
+            f"Status: {self.state}\n"
+            f"Branch: {self.head_branch} -> {self.base_branch}\n"
+            f"URL: {self.url}\n"
+            f"---\n"
+            f"{self.body or 'No description'}\n"
+            f"\n### Comments ({len(self.comments)}):\n\n"
+            f"{comments_str}"
+        )
+
+
 class GitHubClient:
     """
     GitHub client for Issue management and repository operations.
@@ -174,6 +230,94 @@ class GitHubClient:
                 f"Failed to fetch PR #{pr_number}: {e.data.get('message', str(e))}"
             ) from e
 
+    def get_pr_data_with_comments(self, repo_name: str, pr_number: int) -> PRData:
+        """
+        Fetch Pull Request data with all comments.
+
+        This includes:
+        - Review comments (inline code comments)
+        - Issue comments (general discussion)
+        - Review summaries (with approval state)
+
+        Args:
+            repo_name: Repository name (owner/repo)
+            pr_number: Pull Request number
+
+        Returns:
+            Parsed PR data with all comments
+
+        Raises:
+            RuntimeError: If PR not found
+        """
+        try:
+            repo = self.get_repo(repo_name)
+            pr = repo.get_pull(pr_number)
+
+            comments: list[PRCommentData] = []
+
+            # 1. Fetch review comments (inline code comments)
+            for review_comment in pr.get_review_comments():
+                comments.append(
+                    PRCommentData(
+                        author=review_comment.user.login,
+                        body=review_comment.body,
+                        comment_type="review_comment",
+                        created_at=review_comment.created_at.isoformat(),
+                        path=review_comment.path,
+                        line=review_comment.line,
+                    )
+                )
+
+            # 2. Fetch issue comments (general discussion)
+            # PR comments are also accessible as issue comments
+            issue = repo.get_issue(pr_number)
+            for issue_comment in issue.get_comments():
+                comments.append(
+                    PRCommentData(
+                        author=issue_comment.user.login,
+                        body=issue_comment.body,
+                        comment_type="issue_comment",
+                        created_at=issue_comment.created_at.isoformat(),
+                    )
+                )
+
+            # 3. Fetch reviews (with approval state)
+            for review in pr.get_reviews():
+                # Only include reviews with body text or state changes
+                if review.body or review.state in ["APPROVED", "CHANGES_REQUESTED"]:
+                    comments.append(
+                        PRCommentData(
+                            author=review.user.login,
+                            body=review.body or f"Review: {review.state}",
+                            comment_type="review",
+                            created_at=review.submitted_at.isoformat() if review.submitted_at else "",
+                            review_state=review.state,
+                        )
+                    )
+
+            # Sort all comments by creation time
+            comments.sort(key=lambda c: c.created_at)
+
+            return PRData(
+                number=pr.number,
+                title=pr.title,
+                body=pr.body or "",
+                state=pr.state,
+                url=pr.html_url,
+                head_branch=pr.head.ref,
+                base_branch=pr.base.ref,
+                comments=comments,
+            )
+
+        except UnknownObjectException as e:
+            raise RuntimeError(
+                f"Pull Request #{pr_number} not found in repository '{repo_name}'."
+            ) from e
+        except GithubException as e:
+            raise RuntimeError(
+                f"Failed to fetch PR data for #{pr_number}: {e.data.get('message', str(e))}"
+            ) from e
+
     def clone_repository(
         self,
         repo_name: str,
@@ -257,6 +401,9 @@ class GitHubClient:
         """
         Commit and push changes to a branch.
 
+        If the branch already exists locally (e.g., from an existing PR),
+        this will add a new commit to it. Otherwise, it creates the branch.
+
         Args:
             repo_path: Path to local repository
             branch_name: Branch name for commit
@@ -270,12 +417,21 @@ class GitHubClient:
         try:
             repo = git.Repo(repo_path)
 
-            # Create new branch or switch to existing
-            try:
-                repo.git.checkout("-b", branch_name)
-            except git.GitCommandError:
-                # Branch already exists, switch to it
-                repo.git.checkout(branch_name)
+            # Get current branch
+            current_branch = repo.active_branch.name
+
+            # If not on target branch, checkout to it
+            if current_branch != branch_name:
+                try:
+                    # Try to create new branch
+                    repo.git.checkout("-b", branch_name)
+                except git.GitCommandError:
+                    # Branch already exists (locally or remotely), switch to it
+                    try:
+                        repo.git.checkout(branch_name)
+                    except git.GitCommandError:
+                        # Branch might exist on remote but not locally
+                        repo.git.checkout("-b", branch_name, f"origin/{branch_name}")
 
             # Stage all changes
             repo.git.add(A=True)
@@ -291,8 +447,14 @@ class GitHubClient:
             )
 
             # Push to remote
+            # Use --force-with-lease for safety when updating existing branches
             origin = repo.remote("origin")
-            origin.push(branch_name, set_upstream=True)
+            try:
+                origin.push(branch_name, set_upstream=True)
+            except git.GitCommandError:
+                # If push fails, might need to force push (for existing PR branches)
+                # Use --force-with-lease which is safer than --force
+                origin.push(branch_name, set_upstream=True, force_with_lease=True)
 
         except git.GitCommandError as e:
             raise RuntimeError(f"Git operation failed: {str(e)}") from e
