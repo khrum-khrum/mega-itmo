@@ -497,8 +497,41 @@ You have access to tools for:
 - Creating, updating, and deleting files
 - Running commands
 - Checking git diff
+- Checking GitHub workflow status
 
-Start by understanding the repository structure, then implement the required changes.
+**WORKFLOW:**
+1. Understand the repository structure and requirements
+2. Check baseline: Use check_github_workflows with 'HEAD' to see current workflow status
+3. Implement the required changes
+4. Commit your changes using git commands
+5. Verify: Use check_github_workflows with 'HEAD' again to ensure workflows still pass
+6. If workflows fail: Analyze errors, fix issues, commit, and re-verify
+7. Only complete when ALL workflows are successful
+
+**CRITICAL WORKFLOW VERIFICATION:**
+GitHub workflows (CI/CD pipelines) are the primary indicator of code quality:
+
+**BEFORE STARTING:**
+- Check current workflow status to establish a baseline
+- Note which workflows exist and their status
+
+**AFTER MAKING CHANGES:**
+- Commit your changes first
+- Use check_github_workflows tool with commit_sha='HEAD' to check workflow status
+- ALL workflows that were passing before MUST pass after your changes
+- If ANY workflow fails:
+  * Read the workflow file (.github/workflows/*.yml) to understand what it does
+  * Use run_command to execute the same tests locally
+  * Analyze the error messages
+  * Fix the underlying issues in your code
+  * Commit the fixes
+  * Re-run check_github_workflows until ALL workflows pass
+- Only complete your task when ALL workflows are successful
+
+**IMPORTANT:**
+If workflows were passing before your changes, they MUST pass after your changes.
+Failing workflows indicate that your code has issues that MUST be fixed.
+Do not consider the task complete until all workflows pass.
 """
         return prompt
 

@@ -245,6 +245,107 @@ To use it effectively, ensure Context7 MCP is configured in your environment.
         return f"Error querying library docs for {library_name}: {str(e)}"
 
 
+@tool
+def check_pr_workflows(
+    commit_sha: Annotated[str, "Commit SHA to check workflows for (use 'HEAD' for current commit)"],
+) -> str:
+    """
+    Check GitHub Actions workflow status for a Pull Request commit.
+
+    Use this tool to verify that GitHub workflows (CI/CD pipelines) are passing
+    for the PR changes. This is MANDATORY for approving a PR.
+
+    **CRITICAL**: A PR should ONLY be approved (marked as READY TO MERGE) if:
+    1. All workflows pass successfully
+    2. No workflow failures exist
+    3. All checks are complete
+
+    Args:
+        commit_sha: Commit SHA to check (use 'HEAD' for the latest commit in the PR)
+
+    Returns:
+        Status of all workflows for the commit
+    """
+    try:
+        import subprocess
+
+        # Get current commit SHA if HEAD is requested
+        if commit_sha.upper() == "HEAD":
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return f"Error getting current commit SHA: {result.stderr}"
+            commit_sha = result.stdout.strip()
+
+        # Get repo name and GitHub token from environment
+        repo_name = os.getenv("GITHUB_REPO")
+        token = os.getenv("GITHUB_TOKEN")
+
+        if not repo_name or not token:
+            return "Error: GITHUB_REPO and GITHUB_TOKEN environment variables must be set"
+
+        # Import here to avoid circular dependency
+        from src.utils.github_client import GitHubClient
+
+        client = GitHubClient(token=token)
+        workflows = client.get_workflow_runs_for_commit(repo_name, commit_sha)
+
+        if not workflows:
+            return f"""No GitHub workflows found for commit {commit_sha[:8]}
+
+⚠️ WARNING: This repository may not have GitHub Actions workflows configured.
+If workflows should exist, this could indicate an issue with the PR.
+"""
+
+        # Format output
+        output_lines = [f"GitHub workflows status for PR commit {commit_sha[:8]}:\n"]
+
+        all_passed = True
+        has_failures = False
+        has_pending = False
+
+        for workflow_name, status in workflows.items():
+            # Determine status emoji
+            if status == "success":
+                emoji = "✅"
+            elif status == "failure":
+                emoji = "❌"
+                all_passed = False
+                has_failures = True
+            elif status in ["in_progress", "queued"]:
+                emoji = "⏳"
+                all_passed = False
+                has_pending = True
+            else:
+                emoji = "⚠️"
+                all_passed = False
+
+            output_lines.append(f"{emoji} {workflow_name}: {status}")
+
+        # Provide clear guidance
+        output_lines.append("")
+        if all_passed:
+            output_lines.append("✅ All workflows passed successfully!")
+            output_lines.append("✅ PR can be approved (READY TO MERGE)")
+        elif has_failures:
+            output_lines.append("❌ Some workflows FAILED!")
+            output_lines.append("❌ PR MUST NOT be approved (mark as NEEDS CHANGES)")
+            output_lines.append("The code has issues that must be fixed before merging.")
+        elif has_pending:
+            output_lines.append("⏳ Some workflows are still running...")
+            output_lines.append("⚠️ Wait for all workflows to complete before final assessment")
+            output_lines.append("PR should be marked as REQUIRES DISCUSSION until workflows complete")
+
+        return "\n".join(output_lines)
+
+    except Exception as e:
+        return f"Error checking GitHub workflows: {str(e)}"
+
+
 # Export all tools
 ALL_REVIEW_TOOLS = [
     read_pr_file,
@@ -253,4 +354,5 @@ ALL_REVIEW_TOOLS = [
     analyze_pr_complexity,
     fetch_issue_details,
     query_library_docs,
+    check_pr_workflows,
 ]

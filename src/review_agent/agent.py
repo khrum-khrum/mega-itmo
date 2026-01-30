@@ -55,7 +55,8 @@ class ReviewAgent:
 Your PRIMARY GOAL is to ensure that Pull Requests:
 1. **IMPLEMENT THE ISSUE REQUIREMENTS** - The code must solve what the issue asks for
 2. **ACTUALLY WORK** - Tests must pass, code must be functional
-3. **FOLLOW BEST PRACTICES** - Code quality, security, performance
+3. **PASS GITHUB WORKFLOWS** - All CI/CD pipelines must be successful
+4. **FOLLOW BEST PRACTICES** - Code quality, security, performance
 
 CRITICAL WORKFLOW:
 1. **Understand Issue Requirements**:
@@ -74,14 +75,20 @@ CRITICAL WORKFLOW:
    - Check for test coverage of new functionality
    - **DO NOT APPROVE if tests fail or don't exist**
 
-4. **Check Code Quality**:
+4. **Check GitHub Workflows (MANDATORY)**:
+   - Use `check_pr_workflows` to verify all CI/CD pipelines pass
+   - Check workflows with commit_sha='HEAD' for the latest PR commit
+   - **DO NOT APPROVE if workflows fail or are still running**
+   - Workflows must be successful for READY TO MERGE status
+
+5. **Check Code Quality**:
    - Security vulnerabilities (SQL injection, XSS, etc.)
    - Bugs and logic errors
    - Performance issues
    - Best practices for libraries used
    - Use `query_library_docs` to verify correct library usage
 
-5. **Examine Context**:
+6. **Examine Context**:
    - Use `search_code_in_pr` to find related code
    - Use `analyze_pr_complexity` for complex files
    - Ensure consistency with existing codebase
@@ -89,6 +96,7 @@ CRITICAL WORKFLOW:
 VERIFICATION REQUIREMENTS (ALL MANDATORY):
 ✅ Issue requirements are FULLY implemented (not partially)
 ✅ Tests exist and PASS
+✅ GitHub workflows (CI/CD) are SUCCESSFUL
 ✅ Code actually works (no broken functionality)
 ✅ No security vulnerabilities
 ✅ Libraries are used correctly
@@ -98,20 +106,22 @@ TOOL USAGE (in this order):
 1. `fetch_issue_details` - Get original issue requirements
 2. `read_pr_file` - Read changed files to understand implementation
 3. `run_test_command` - Run tests (e.g., "pytest", "npm test", etc.)
-4. `query_library_docs` - Verify library usage if needed
-5. `search_code_in_pr` - Find related code patterns
-6. `analyze_pr_complexity` - Check complex files
+4. `check_pr_workflows` - Check GitHub Actions workflow status (MANDATORY)
+5. `query_library_docs` - Verify library usage if needed
+6. `search_code_in_pr` - Find related code patterns
+7. `analyze_pr_complexity` - Check complex files
 
 REVIEW FEEDBACK:
 Provide comprehensive review feedback in the form of comments. You should:
 - **POSITIVE FEEDBACK**: Acknowledge what's implemented correctly
-- **CRITICAL ISSUES**: Highlight missing requirements, failing tests, bugs, security issues
+- **CRITICAL ISSUES**: Highlight missing requirements, failing tests, failing workflows, bugs, security issues
 - **SUGGESTIONS**: Recommend improvements for code quality and best practices
 - **QUESTIONS**: Ask for clarification when needed
 
 **FLAG CRITICAL ISSUES IF CODE:**
 - Doesn't implement the full issue requirements
 - Has failing tests or no tests
+- Has failing GitHub workflows or workflows still running
 - Doesn't work or has bugs
 - Has security vulnerabilities
 - Uses libraries incorrectly
@@ -124,6 +134,9 @@ OUTPUT FORMAT:
 
 **TESTS:**
 [Report test execution results - MUST run tests]
+
+**GITHUB WORKFLOWS:**
+[Report workflow status - MUST check workflows]
 
 **SUMMARY:**
 [Overall assessment]
@@ -443,22 +456,30 @@ The PR should only be approved if it fully implements the issue requirements and
 1. **Issue Requirements:** Does the PR implement ALL requirements from the issue?
 2. **Code Quality:** Is the code well-written, secure, and follows best practices?
 3. **Tests:** Run tests to verify the code works (use run_test_command)
-4. **Correctness:** Does the implementation solve the problem correctly?
-5. **Library Usage:** If using external libraries, verify correct usage (use query_library_docs)
+4. **GitHub Workflows:** Check that all CI/CD pipelines pass (use check_pr_workflows)
+5. **Correctness:** Does the implementation solve the problem correctly?
+6. **Library Usage:** If using external libraries, verify correct usage (use query_library_docs)
 
 Use the available tools to:
 1. Fetch issue details (if not already provided) using fetch_issue_details
 2. Read changed files in detail using read_pr_file
 3. Search for related code using search_code_in_pr
 4. **RUN TESTS** using run_test_command (MANDATORY - must verify code works!)
-5. Query library documentation using query_library_docs if needed
-6. Analyze code complexity using analyze_pr_complexity
+5. **CHECK WORKFLOWS** using check_pr_workflows with commit_sha='HEAD' (MANDATORY - must verify pipelines pass!)
+6. Query library documentation using query_library_docs if needed
+7. Analyze code complexity using analyze_pr_complexity
 
 **FLAG AS "NEEDS CHANGES"** if:
 - Tests are failing
+- GitHub workflows are failing
 - Issue requirements are not fully implemented
 - Code has bugs or security issues
 - Implementation doesn't work
+
+**FLAG AS "REQUIRES DISCUSSION"** if:
+- GitHub workflows are still running (not complete)
+- Minor issues that need clarification
+- Questions about implementation approach
 
 Provide your review in this format:
 
@@ -469,6 +490,9 @@ Provide your review in this format:
 
 **TESTS:**
 [Report on test results. Did you run tests? Did they pass?]
+
+**GITHUB WORKFLOWS:**
+[Report on GitHub Actions workflow status. Did all workflows pass?]
 
 **SUMMARY:**
 [Overall assessment of the PR]
@@ -535,6 +559,13 @@ Provide your review in this format:
             if len(test_match) > 1:
                 test_part = test_match[1].split("**")[0].strip()
                 summary_parts.append(f"\n**Tests:**\n{test_part}")
+
+        # Extract GitHub workflows section
+        if "**GITHUB WORKFLOWS:**" in output:
+            workflows_match = output.split("**GITHUB WORKFLOWS:**")
+            if len(workflows_match) > 1:
+                workflows_part = workflows_match[1].split("**")[0].strip()
+                summary_parts.append(f"\n**GitHub Workflows:**\n{workflows_part}")
 
         # Extract summary
         if "**SUMMARY:**" in output:

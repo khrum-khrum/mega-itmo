@@ -357,6 +357,88 @@ def get_git_diff(file_path: Annotated[str, "Path to file to check"] = None) -> s
         return f"Error getting git diff: {str(e)}"
 
 
+@tool
+def check_github_workflows(
+    commit_sha: Annotated[str, "Commit SHA to check workflows for (use 'HEAD' for current commit)"],
+) -> str:
+    """
+    Check GitHub Actions workflow status for a specific commit.
+
+    Use this tool to verify that GitHub workflows (CI/CD pipelines) are passing
+    for your changes. This is CRITICAL before finalizing your work.
+
+    IMPORTANT: You MUST verify workflows pass before completing your task.
+    If workflows fail, you need to fix the issues causing the failures.
+
+    Args:
+        commit_sha: Commit SHA to check (use 'HEAD' for the latest commit)
+
+    Returns:
+        Status of all workflows for the commit
+    """
+    try:
+        # Get current commit SHA if HEAD is requested
+        if commit_sha.upper() == "HEAD":
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return f"Error getting current commit SHA: {result.stderr}"
+            commit_sha = result.stdout.strip()
+
+        # Get repo name and GitHub token from environment
+        repo_name = os.getenv("GITHUB_REPO")
+        token = os.getenv("GITHUB_TOKEN")
+
+        if not repo_name or not token:
+            return "Error: GITHUB_REPO and GITHUB_TOKEN environment variables must be set"
+
+        # Import here to avoid circular dependency
+        from src.utils.github_client import GitHubClient
+
+        client = GitHubClient(token=token)
+        workflows = client.get_workflow_runs_for_commit(repo_name, commit_sha)
+
+        if not workflows:
+            return f"No GitHub workflows found for commit {commit_sha[:8]}"
+
+        # Format output
+        output_lines = [f"GitHub workflows status for commit {commit_sha[:8]}:\n"]
+
+        all_passed = True
+        for workflow_name, status in workflows.items():
+            # Determine status emoji
+            if status == "success":
+                emoji = "✅"
+            elif status == "failure":
+                emoji = "❌"
+                all_passed = False
+            elif status in ["in_progress", "queued"]:
+                emoji = "⏳"
+                all_passed = False
+            else:
+                emoji = "⚠️"
+                all_passed = False
+
+            output_lines.append(f"{emoji} {workflow_name}: {status}")
+
+        if all_passed:
+            output_lines.append("\n✅ All workflows passed successfully!")
+        else:
+            output_lines.append(
+                "\n⚠️ Some workflows failed or are still running. "
+                "You MUST fix any failures before completing the task."
+            )
+
+        return "\n".join(output_lines)
+
+    except Exception as e:
+        return f"Error checking GitHub workflows: {str(e)}"
+
+
 # Export all tools
 ALL_TOOLS = [
     read_file,
@@ -368,4 +450,5 @@ ALL_TOOLS = [
     delete_file,
     run_command,
     get_git_diff,
+    check_github_workflows,
 ]

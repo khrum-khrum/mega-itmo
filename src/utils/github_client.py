@@ -524,3 +524,49 @@ class GitHubClient:
                 raise RuntimeError(
                     f"Failed to create Pull Request: {e.data.get('message', str(e))}"
                 ) from e
+
+    def get_workflow_runs_for_commit(
+        self,
+        repo_name: str,
+        commit_sha: str,
+    ) -> dict[str, str]:
+        """
+        Get GitHub Actions workflow runs status for a specific commit.
+
+        Args:
+            repo_name: Repository name (owner/repo)
+            commit_sha: Commit SHA to check workflows for
+
+        Returns:
+            Dictionary mapping workflow names to their status
+            Status can be: "success", "failure", "pending", "in_progress", etc.
+            Empty dict if no workflows found
+
+        Raises:
+            RuntimeError: If workflow check fails
+        """
+        try:
+            repo = self.get_repo(repo_name)
+
+            # Get all workflow runs for this commit
+            workflow_runs = repo.get_workflow_runs(head_sha=commit_sha)
+
+            if workflow_runs.totalCount == 0:
+                return {}
+
+            # Build status map: workflow name -> status
+            status_map = {}
+            for run in workflow_runs:
+                # Status: queued, in_progress, completed
+                # Conclusion: success, failure, neutral, cancelled, skipped, timed_out, action_required
+                if run.status == "completed":
+                    status_map[run.name] = run.conclusion or "unknown"
+                else:
+                    status_map[run.name] = run.status
+
+            return status_map
+
+        except GithubException as e:
+            raise RuntimeError(
+                f"Failed to get workflow runs for commit {commit_sha}: {e.data.get('message', str(e))}"
+            ) from e
