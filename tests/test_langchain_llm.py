@@ -52,9 +52,7 @@ class TestLangChainAgentInit:
         mock_chat_openai.return_value = MagicMock()
         mock_create_agent.return_value = MagicMock()
 
-        agent = LangChainAgent(
-            tools=[], api_key="test-key", model="anthropic/claude-3.5-sonnet"
-        )
+        agent = LangChainAgent(tools=[], api_key="test-key", model="anthropic/claude-3.5-sonnet")
 
         assert agent.model == "anthropic/claude-3.5-sonnet"
         mock_chat_openai.assert_called_once()
@@ -70,9 +68,7 @@ class TestLangChainAgentInit:
         mock_chat_openai.return_value = MagicMock()
         mock_create_agent.return_value = MagicMock()
 
-        LangChainAgent(
-            tools=[], api_key="test-key", base_url="https://custom-api.example.com/v1"
-        )
+        LangChainAgent(tools=[], api_key="test-key", base_url="https://custom-api.example.com/v1")
 
         call_kwargs = mock_chat_openai.call_args[1]
         assert call_kwargs["openai_api_base"] == "https://custom-api.example.com/v1"
