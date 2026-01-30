@@ -397,7 +397,7 @@ class GitHubClient:
         commit_message: str,
         author_name: str = "Code Agent",
         author_email: str = "code-agent@github.com",
-    ) -> None:
+    ) -> bool:
         """
         Commit and push changes to a branch.
 
@@ -410,6 +410,9 @@ class GitHubClient:
             commit_message: Commit message
             author_name: Author name
             author_email: Author email
+
+        Returns:
+            True if changes were committed and pushed, False if no changes to commit
 
         Raises:
             RuntimeError: If git operations fail
@@ -438,7 +441,8 @@ class GitHubClient:
 
             # Check if there are changes to commit
             if not repo.is_dirty() and not repo.untracked_files:
-                raise RuntimeError("No changes to commit")
+                # No changes to commit - this is not an error, just nothing to do
+                return False
 
             # Commit
             repo.index.commit(
@@ -455,6 +459,8 @@ class GitHubClient:
                 # If push fails, might need to force push (for existing PR branches)
                 # Use --force-with-lease which is safer than --force
                 origin.push(branch_name, set_upstream=True, force_with_lease=True)
+
+            return True
 
         except git.GitCommandError as e:
             raise RuntimeError(f"Git operation failed: {str(e)}") from e

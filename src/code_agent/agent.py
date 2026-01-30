@@ -199,14 +199,18 @@ class CodeAgent:
             print(f"\n📝 Committing and pushing changes to branch '{result.branch_name}'...")
 
         try:
-            self.github.commit_and_push_changes(
+            has_changes = self.github.commit_and_push_changes(
                 repo_path=result.repo_path,
                 branch_name=result.branch_name,
                 commit_message=commit_message,
             )
 
-            if verbose:
-                print(f"✅ Changes pushed to {result.branch_name}")
+            if has_changes:
+                if verbose:
+                    print(f"✅ Changes pushed to {result.branch_name}")
+            else:
+                if verbose:
+                    print(f"ℹ️  No changes to commit - PR is already in good state")
 
         except Exception as e:
             raise RuntimeError(f"Failed to commit and push: {str(e)}") from e
