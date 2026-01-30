@@ -1,8 +1,6 @@
 """GitHub client for repository operations."""
 
 import os
-import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,13 +48,15 @@ class GitHubClient:
     - Creating Pull Requests
     """
 
-    def __init__(self, token: str | None = None):
+    def __init__(self, token: str | None = None, repos_dir: str | None = None):
         """
         Initialize GitHub client.
 
         Args:
             token: GitHub Personal Access Token.
                    If not provided, uses GITHUB_TOKEN environment variable.
+            repos_dir: Directory where cloned repositories will be stored.
+                      If not provided, uses ./repos directory.
 
         Raises:
             ValueError: If token is not found
@@ -68,6 +68,8 @@ class GitHubClient:
                 "Pass it as argument or set GITHUB_TOKEN environment variable."
             )
         self._client = Github(self.token)
+        self.repos_dir = Path(repos_dir) if repos_dir else Path("./repos")
+        self.repos_dir.mkdir(parents=True, exist_ok=True)
 
     def get_repo(self, repo_name: str) -> Repository:
         """
@@ -108,51 +110,73 @@ class GitHubClient:
         self,
         repo_name: str,
         branch: str | None = None,
-        target_dir: str | None = None,
     ) -> str:
         """
-        Clone repository to local filesystem.
+        Clone repository to local filesystem or pull latest changes if exists.
+
+        If the repository already exists in the configured directory, it will:
+        1. Fetch latest changes from remote
+        2. Reset to clean state
+        3. Checkout target branch
+        4. Pull latest changes
 
         Args:
             repo_name: Repository name (owner/repo)
             branch: Branch to clone (default: repository's default branch)
-            target_dir: Target directory (if None, creates temporary directory)
 
         Returns:
             Path to cloned repository
 
         Raises:
-            RuntimeError: If cloning fails
+            RuntimeError: If cloning or pulling fails
         """
-        repo = self.get_repo(repo_name)
-        target_branch = branch or repo.default_branch
+        repo_obj = self.get_repo(repo_name)
+        target_branch = branch or repo_obj.default_branch
 
-        # Create target directory
-        if target_dir is None:
-            target_dir = tempfile.mkdtemp(prefix=f"repo_{repo_name.replace('/', '_')}_")
-        else:
-            target_path = Path(target_dir)
-            target_path.mkdir(parents=True, exist_ok=True)
-            target_dir = str(target_path)
+        # Use configured repos directory
+        target_dir = self.repos_dir / repo_name.replace("/", "_")
+        target_dir.mkdir(parents=True, exist_ok=True)
 
         # Build clone URL with authentication
         clone_url = f"https://{self.token}@github.com/{repo_name}.git"
 
         try:
-            # Clone repository (shallow clone for efficiency)
-            git.Repo.clone_from(
-                clone_url,
-                target_dir,
-                branch=target_branch,
-                depth=1,  # Shallow clone - only latest commit
-            )
-            return target_dir
+            # Check if repository already exists
+            if (target_dir / ".git").exists():
+                # Repository exists - pull latest changes
+                local_repo = git.Repo(str(target_dir))
+
+                # Fetch latest changes
+                origin = local_repo.remote("origin")
+                origin.fetch()
+
+                # Reset any local changes to ensure clean state
+                local_repo.git.reset("--hard")
+                local_repo.git.clean("-fd")
+
+                # Checkout target branch
+                try:
+                    local_repo.git.checkout(target_branch)
+                except git.GitCommandError:
+                    # Branch might not exist locally, create tracking branch
+                    local_repo.git.checkout("-b", target_branch, f"origin/{target_branch}")
+
+                # Pull latest changes
+                origin.pull(target_branch)
+
+                return str(target_dir)
+            else:
+                # Repository doesn't exist - clone it
+                git.Repo.clone_from(
+                    clone_url,
+                    str(target_dir),
+                    branch=target_branch,
+                    depth=1,  # Shallow clone for efficiency
+                )
+                return str(target_dir)
 
         except git.GitCommandError as e:
-            # Clean up on error
-            if os.path.exists(target_dir):
-                shutil.rmtree(target_dir)
-            raise RuntimeError(f"Failed to clone repository: {str(e)}") from e
+            raise RuntimeError(f"Failed to clone/pull repository: {str(e)}") from e
 
     def commit_and_push_changes(
         self,

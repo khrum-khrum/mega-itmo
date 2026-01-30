@@ -22,8 +22,8 @@ format:
 
 run-example:
 	python -m src.code_agent.cli \
-		--issue 5 \
-		--model meta-llama/llama-3.1-70b-instruct \
+		--issue 8 \
+		--model upstage/solar-pro-3:free \
 		--execute \
 		-v
 

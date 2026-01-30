@@ -56,6 +56,11 @@ from src.utils.github_client import GitHubClient
     is_flag=True,
     help="Verbose output",
 )
+@click.option(
+    "--repos-dir",
+    default="./repos",
+    help="Directory where cloned repositories will be stored (default: ./repos)",
+)
 def main(
     repo: str,
     issue: int,
@@ -65,6 +70,7 @@ def main(
     dry_run: bool,
     execute: bool,
     verbose: bool,
+    repos_dir: str,
 ) -> None:
     """
     LangChain-based Code Agent - analyzes Issues and generates code solutions.
@@ -84,6 +90,10 @@ def main(
         # Create PR automatically
         python -m src.code_agent.cli --repo owner/repo --issue 1 --execute
 
+        # Custom repos directory
+        python -m src.code_agent.cli --repo owner/repo --issue 1 \\
+            --repos-dir /path/to/repos
+
         # Verbose mode
         python -m src.code_agent.cli --repo owner/repo --issue 1 -v
     """
@@ -97,9 +107,9 @@ def main(
 
     # Initialize GitHub client
     try:
-        github_client = GitHubClient(token=token)
+        github_client = GitHubClient(token=token, repos_dir=repos_dir)
         if verbose:
-            click.echo("✅ GitHub client initialized")
+            click.echo(f"✅ GitHub client initialized (repos directory: {repos_dir})")
     except ValueError as e:
         click.echo(f"❌ GitHub client error: {e}", err=True)
         sys.exit(1)

@@ -1,9 +1,7 @@
 """Refactored Code Agent using LangChain with tools."""
 
 import os
-import shutil
 from dataclasses import dataclass
-from pathlib import Path
 
 from src.code_agent.tools import ALL_TOOLS
 from src.utils.github_client import GitHubClient, IssueData
@@ -234,16 +232,14 @@ Closes #{issue_number}
 
     def cleanup(self, verbose: bool = False) -> None:
         """
-        Clean up cloned repository.
+        Clean up - no longer removes repositories as they are reused.
 
         Args:
             verbose: Whether to print verbose output
         """
-        if self.repo_path and os.path.exists(self.repo_path):
-            if verbose:
-                print(f"\n🧹 Cleaning up: {self.repo_path}")
-            shutil.rmtree(self.repo_path)
-            self.repo_path = None
+        if verbose and self.repo_path:
+            print(f"\n✅ Repository preserved at: {self.repo_path}")
+        self.repo_path = None
 
     def _build_issue_prompt(self, issue: IssueData, repo_name: str) -> str:
         """
