@@ -218,18 +218,15 @@ async def handle_pr_review_event(
     pull_request = payload.get("pull_request", {})
     repository = payload.get("repository", {})
 
-    # Only handle submitted reviews with changes requested
+    # Only handle submitted reviews
     if action != "submitted":
         logger.info(f"Ignoring PR review action: {action}")
         return {"status": "ignored", "reason": f"Action {action} not handled"}
 
+    # Accept all review states (APPROVED, COMMENTED, CHANGES_REQUESTED)
+    # The Code Agent will analyze the review content and decide if changes are needed
     review_state = review.get("state", "").lower()
-    if review_state != "changes_requested":
-        logger.info(f"Ignoring review state: {review_state}")
-        return {
-            "status": "ignored",
-            "reason": f"Review state {review_state} not handled",
-        }
+    logger.info(f"Processing PR review with state: {review_state}")
 
     # Extract PR details
     repo_full_name = repository.get("full_name")
