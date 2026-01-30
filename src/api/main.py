@@ -105,6 +105,8 @@ async def handle_webhook(
     Supported events:
     - issues: opened, reopened (triggers Code Agent to implement feature)
     - pull_request_review: submitted with changes_requested (triggers Code Agent to fix issues)
+    - pull_request_review_comment: created (triggers Code Agent when inline review comment added)
+    - issue_comment: created on PR (triggers Code Agent when general comment added to PR)
 
     Args:
         request: FastAPI request object
@@ -136,6 +138,10 @@ async def handle_webhook(
         return await handle_issue_event(payload, background_tasks)
     elif x_github_event == "pull_request_review":
         return await handle_pr_review_event(payload, background_tasks)
+    elif x_github_event == "pull_request_review_comment":
+        return await handle_pr_review_comment_event(payload, background_tasks)
+    elif x_github_event == "issue_comment":
+        return await handle_issue_comment_event(payload, background_tasks)
     elif x_github_event == "ping":
         logger.info("Received ping event")
         return {"status": "pong"}
@@ -254,6 +260,135 @@ async def handle_pr_review_event(
     return {
         "status": "accepted",
         "message": f"Code Agent scheduled for PR #{pr_number}",
+    }
+
+
+async def handle_pr_review_comment_event(
+    payload: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+) -> Dict[str, str]:
+    """
+    Handle pull request review comment webhook events.
+
+    Triggers Code Agent when a review comment is added to a PR.
+    These are inline code comments on specific lines.
+
+    Args:
+        payload: Webhook payload
+        background_tasks: Background task manager
+
+    Returns:
+        Response indicating task was scheduled
+    """
+    action = payload.get("action")
+    pull_request = payload.get("pull_request", {})
+    repository = payload.get("repository", {})
+
+    # Only handle created comments (ignore edited/deleted)
+    if action != "created":
+        logger.info(f"Ignoring PR review comment action: {action}")
+        return {"status": "ignored", "reason": f"Action {action} not handled"}
+
+    # Extract PR details
+    repo_full_name = repository.get("full_name")
+    pr_number = pull_request.get("number")
+
+    # Try to get issue number from PR body or use PR number
+    pr_body = pull_request.get("body", "")
+    issue_number = extract_issue_number_from_pr(pr_body, pr_number)
+
+    if not repo_full_name or not pr_number or not issue_number:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing repository, PR number, or issue number",
+        )
+
+    logger.info(
+        f"Scheduling Code Agent for PR #{pr_number} (issue #{issue_number}) "
+        f"due to review comment in {repo_full_name}"
+    )
+
+    # Schedule agent execution in background
+    background_tasks.add_task(
+        code_agent_service.handle_pr_review,
+        repo_full_name=repo_full_name,
+        issue_number=issue_number,
+        pr_number=pr_number,
+    )
+
+    return {
+        "status": "accepted",
+        "message": f"Code Agent scheduled for PR #{pr_number} (review comment)",
+    }
+
+
+async def handle_issue_comment_event(
+    payload: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+) -> Dict[str, str]:
+    """
+    Handle issue comment webhook events.
+
+    Triggers Code Agent when a comment is added to a PR.
+    Note: issue_comment events fire for both issues and PRs
+    (PRs are issues in GitHub's model).
+
+    Args:
+        payload: Webhook payload
+        background_tasks: Background task manager
+
+    Returns:
+        Response indicating task was scheduled
+    """
+    action = payload.get("action")
+    issue = payload.get("issue", {})
+    repository = payload.get("repository", {})
+
+    # Only handle created comments
+    if action != "created":
+        logger.info(f"Ignoring issue comment action: {action}")
+        return {"status": "ignored", "reason": f"Action {action} not handled"}
+
+    # Check if this is a PR (PRs have pull_request field in issue object)
+    is_pull_request = "pull_request" in issue
+
+    if not is_pull_request:
+        logger.info("Ignoring comment on regular issue (not a PR)")
+        return {
+            "status": "ignored",
+            "reason": "Comment is on an issue, not a pull request",
+        }
+
+    # Extract PR details
+    repo_full_name = repository.get("full_name")
+    pr_number = issue.get("number")
+
+    # Try to get issue number from PR body or use PR number
+    issue_body = issue.get("body", "")
+    issue_number = extract_issue_number_from_pr(issue_body, pr_number)
+
+    if not repo_full_name or not pr_number or not issue_number:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing repository, PR number, or issue number",
+        )
+
+    logger.info(
+        f"Scheduling Code Agent for PR #{pr_number} (issue #{issue_number}) "
+        f"due to issue comment in {repo_full_name}"
+    )
+
+    # Schedule agent execution in background
+    background_tasks.add_task(
+        code_agent_service.handle_pr_review,
+        repo_full_name=repo_full_name,
+        issue_number=issue_number,
+        pr_number=pr_number,
+    )
+
+    return {
+        "status": "accepted",
+        "message": f"Code Agent scheduled for PR #{pr_number} (issue comment)",
     }
 
 

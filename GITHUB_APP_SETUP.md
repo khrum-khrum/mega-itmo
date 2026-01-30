@@ -119,6 +119,8 @@ Your webhook URL will be: `http://your-server-ip:8000/webhook`
 **Subscribe to events:**
 - ✅ Issues (for new issue events)
 - ✅ Pull request review (for PR review feedback)
+- ✅ Pull request review comment (for inline code comments)
+- ✅ Issue comment (for general PR comments)
 
 **Where can this GitHub App be installed?**
 - Choose "Any account" or "Only on this account"
@@ -230,6 +232,43 @@ The Code Agent API handles the following GitHub webhook events:
 3. Addresses all feedback
 4. Commits changes to the same PR branch
 5. PR is automatically updated
+
+### 3. Pull Request Review Comment Events
+
+**Trigger:** When a reviewer adds an inline code comment on a specific line in a PR
+
+**Webhook event:** `pull_request_review_comment`
+
+**Actions handled:**
+- `created` - New inline review comment added
+
+**Behavior:**
+1. Code Agent fetches PR and all comments (including the new one)
+2. Checks out existing PR branch
+3. Analyzes and addresses the specific comment
+4. Commits changes to the same PR branch
+5. PR is automatically updated
+
+**Note:** This event is for inline code comments on specific lines/files in the "Files changed" tab.
+
+### 4. Issue Comment Events
+
+**Trigger:** When someone adds a general comment to a Pull Request (conversation tab)
+
+**Webhook event:** `issue_comment`
+
+**Actions handled:**
+- `created` - New comment added to PR (only processes PR comments, not issue comments)
+
+**Behavior:**
+1. Code Agent checks if comment is on a PR (not a regular issue)
+2. Fetches PR and all comments
+3. Checks out existing PR branch
+4. Analyzes and addresses the comment feedback
+5. Commits changes to the same PR branch
+6. PR is automatically updated
+
+**Note:** GitHub treats PRs as issues, so PR comments trigger `issue_comment` events. The API filters to only process PR comments, not regular issue comments.
 
 ## Manual API Endpoints
 
