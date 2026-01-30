@@ -42,7 +42,7 @@ Required environment variables:
 GITHUB_TOKEN=ghp_your_token_here              # GitHub Personal Access Token
 OPENROUTER_API_KEY=sk-or-v1-your_key_here    # OpenRouter API key
 GITHUB_WEBHOOK_SECRET=your_secret_here         # Secret for webhook verification
-CODE_AGENT_MODEL=meta-llama/llama-3.1-70b-instruct  # Optional: LLM model
+CODE_AGENT_MODEL=llama-3.3-70b-versatile  # Optional: LLM model
 REPOS_DIR=./repos                              # Optional: repos directory
 ```
 

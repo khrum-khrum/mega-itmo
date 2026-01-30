@@ -113,7 +113,7 @@ GITHUB_WEBHOOK_SECRET=your_webhook_secret_from_step1
 OPENROUTER_API_KEY=your_openrouter_api_key
 
 # Review Agent Configuration (Optional)
-REVIEW_AGENT_MODEL=meta-llama/llama-3.1-70b-instruct
+REVIEW_AGENT_MODEL=llama-3.3-70b-versatile
 REVIEW_AGENT_EXECUTE=true  # Set to false for dry-run mode
 REPOS_DIR=/app/repos
 ```

@@ -58,8 +58,8 @@ After implementing the solution, summarize what you did and what files were chan
         self,
         tools: list,
         api_key: str | None = None,
-        model: str = "meta-llama/llama-3.1-70b-instruct",
-        base_url: str = "https://openrouter.ai/api/v1",
+        model: str = "llama-3.3-70b-versatile",
+        base_url: str | None = None,
     ):
         """
         Initialize the LangChain agent.
@@ -68,7 +68,7 @@ After implementing the solution, summarize what you did and what files were chan
             tools: List of LangChain tools to provide to the agent
             api_key: OpenRouter API key (or from env var OPENROUTER_API_KEY)
             model: Model identifier (OpenRouter format)
-            base_url: Base URL for OpenRouter API
+            base_url: Base URL for LLM API (or from env var LLM_BASE_URL, defaults to OpenRouter)
         """
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
@@ -80,11 +80,14 @@ After implementing the solution, summarize what you did and what files were chan
         self.model = model
         self.tools = tools
 
+        # Get base_url from parameter, environment variable, or use default
+        resolved_base_url = base_url or os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+
         # Initialize OpenAI-compatible client pointing to OpenRouter
         self.llm = ChatOpenAI(
             model=model,
             openai_api_key=self.api_key,
-            openai_api_base=base_url,
+            openai_api_base=resolved_base_url,
             temperature=0.2,
             max_tokens=4096,
         )

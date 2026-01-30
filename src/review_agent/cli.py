@@ -26,7 +26,7 @@ load_dotenv()
 )
 @click.option(
     "--model",
-    default="meta-llama/llama-3.1-70b-instruct",
+    default="llama-3.3-70b-versatile",
     help="LLM model to use (OpenRouter format). Default: llama-3.1-70b-instruct",
 )
 @click.option(

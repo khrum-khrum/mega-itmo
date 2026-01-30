@@ -38,9 +38,9 @@ from src.utils.github_client import GitHubClient
 )
 @click.option(
     "--model",
-    default="meta-llama/llama-3.1-70b-instruct",
+    default="llama-3.3-70b-versatile",
     help=(
-        "LLM model to use. Examples: meta-llama/llama-3.1-70b-instruct, "
+        "LLM model to use. Examples: llama-3.3-70b-versatile, "
         "anthropic/claude-3.5-sonnet, openai/gpt-4o"
     ),
 )

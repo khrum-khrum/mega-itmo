@@ -33,7 +33,7 @@ class CodeAgent:
     def __init__(
         self,
         github_client: GitHubClient,
-        model: str = "meta-llama/llama-3.1-70b-instruct",
+        model: str = "llama-3.3-70b-versatile",
         api_key: str | None = None,
     ):
         """
