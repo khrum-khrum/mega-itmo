@@ -66,14 +66,14 @@ After implementing the solution, summarize what you did and what files were chan
 
         Args:
             tools: List of LangChain tools to provide to the agent
-            api_key: OpenRouter API key (or from env var OPENROUTER_API_KEY)
-            model: Model identifier (OpenRouter format)
-            base_url: Base URL for LLM API (or from env var LLM_BASE_URL, defaults to OpenRouter)
+            api_key: API key (or from env var OPENROUTER_API_KEY)
+            model: Model identifier
+            base_url: Base URL for LLM API (or from env var LLM_BASE_URL, defaults to Groq)
         """
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "OpenRouter API key not found. "
+                "API key not found. "
                 "Pass it as argument or set OPENROUTER_API_KEY environment variable."
             )
 

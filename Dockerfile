@@ -8,6 +8,12 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Configure git to use credential helper for GitHub tokens
+# This allows git operations to use the GITHUB_TOKEN environment variable
+RUN git config --global credential.helper store && \
+    git config --global user.name "Code Agent" && \
+    git config --global user.email "agent@example.com"
+
 # Set working directory
 WORKDIR /app
 

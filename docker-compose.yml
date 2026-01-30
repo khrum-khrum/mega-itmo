@@ -13,7 +13,23 @@ services:
       - ./repos:/app/repos
     restart: unless-stopped
     environment:
+      # Repository and Git Configuration
       - REPOS_DIR=/app/repos
+      - GIT_PYTHON_REFRESH=quiet
+
+      # GitHub Configuration (from .env file via env_file)
+      # - GITHUB_TOKEN
+      # - GITHUB_REPO
+      # - GITHUB_WEBHOOK_SECRET
+
+      # LLM Configuration (from .env file via env_file)
+      # - OPENROUTER_API_KEY
+      # - LLM_BASE_URL
+      # - CODE_AGENT_MODEL
+
+      # Override if needed (uncomment and set value)
+      # - CODE_AGENT_MODEL=llama-3.3-70b-versatile
+      # - LLM_BASE_URL=https://api.groq.com/openai/v1
 
   review-agent-api:
     build:
@@ -29,5 +45,23 @@ services:
       - ./repos:/app/repos
     restart: unless-stopped
     environment:
+      # Repository and Git Configuration
       - REPOS_DIR=/app/repos
+      - GIT_PYTHON_REFRESH=quiet
+
+      # Review Agent Configuration
       - REVIEW_AGENT_EXECUTE=true
+
+      # GitHub Configuration (from .env file via env_file)
+      # - GITHUB_TOKEN
+      # - GITHUB_REPO
+      # - GITHUB_WEBHOOK_SECRET
+
+      # LLM Configuration (from .env file via env_file)
+      # - OPENROUTER_API_KEY
+      # - LLM_BASE_URL
+      # - REVIEW_AGENT_MODEL
+
+      # Override if needed (uncomment and set value)
+      # - REVIEW_AGENT_MODEL=llama-3.3-70b-versatile
+      # - LLM_BASE_URL=https://api.groq.com/openai/v1
