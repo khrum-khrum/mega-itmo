@@ -89,6 +89,17 @@ class CodeAgent:
                 if verbose:
                     print(f"✅ Found {len(pr_data.comments)} comments in PR")
 
+                # Check if changes are actually needed based on feedback
+                if not self._should_process_pr_feedback(pr_data, verbose):
+                    if verbose:
+                        print("\n✨ No changes needed - all feedback is positive!")
+                    return AgentResult(
+                        success=True,
+                        output="No changes needed - PR feedback is positive",
+                        repo_path="",
+                        branch_name=pr_data.head_branch if pr_data else "",
+                    )
+
             # 3. Clone repository (or checkout to PR branch if exists)
             if verbose:
                 if pr_data:
@@ -271,6 +282,129 @@ Closes #{issue_number}
         if verbose and self.repo_path:
             print(f"\n✅ Repository preserved at: {self.repo_path}")
         self.repo_path = None
+
+    def _should_process_pr_feedback(self, pr_data: PRData, verbose: bool = False) -> bool:
+        """
+        Determine if PR feedback requires code changes.
+
+        Returns False (skip processing) if:
+        - No comments exist
+        - All reviews are APPROVED with no change requests
+        - Comments contain only positive feedback
+
+        Returns True (process) if:
+        - Any review has state CHANGES_REQUESTED
+        - Comments contain negative feedback or change requests
+        - Comments mention specific issues or bugs
+
+        Args:
+            pr_data: Pull Request data with comments
+            verbose: Whether to print verbose output
+
+        Returns:
+            True if changes are needed, False if PR is ready to merge
+        """
+        if not pr_data.comments:
+            if verbose:
+                print("  → No comments found, skipping changes")
+            return False
+
+        # Keywords that indicate changes are needed
+        negative_keywords = [
+            "fix",
+            "change",
+            "update",
+            "modify",
+            "incorrect",
+            "wrong",
+            "bug",
+            "issue",
+            "problem",
+            "should",
+            "need",
+            "must",
+            "please",
+            "todo",
+            "needs changes",
+            "requested changes",
+        ]
+
+        # Positive keywords that indicate approval
+        positive_keywords = [
+            "lgtm",
+            "looks good",
+            "great",
+            "perfect",
+            "approved",
+            "ready to merge",
+            "well done",
+            "nice",
+            "good job",
+        ]
+
+        has_changes_requested = False
+        has_approval = False
+        negative_comment_count = 0
+        positive_comment_count = 0
+
+        for comment in pr_data.comments:
+            # Check review state
+            if comment.review_state == "CHANGES_REQUESTED":
+                has_changes_requested = True
+                if verbose:
+                    print(f"  → Found CHANGES_REQUESTED review from @{comment.author}")
+
+            elif comment.review_state == "APPROVED":
+                has_approval = True
+                if verbose:
+                    print(f"  → Found APPROVED review from @{comment.author}")
+
+            # Analyze comment body for keywords
+            comment_body_lower = comment.body.lower()
+
+            # Check for negative keywords
+            if any(keyword in comment_body_lower for keyword in negative_keywords):
+                negative_comment_count += 1
+                if verbose:
+                    print(
+                        f"  → Found change request in comment from @{comment.author}: "
+                        f'"{comment.body[:60]}..."'
+                    )
+
+            # Check for positive keywords
+            elif any(keyword in comment_body_lower for keyword in positive_keywords):
+                positive_comment_count += 1
+                if verbose:
+                    print(
+                        f"  → Found positive feedback from @{comment.author}: "
+                        f'"{comment.body[:60]}..."'
+                    )
+
+        # Decision logic
+        if has_changes_requested:
+            if verbose:
+                print("  ✅ Changes are needed (CHANGES_REQUESTED state found)")
+            return True
+
+        if negative_comment_count > 0:
+            if verbose:
+                print(f"  ✅ Changes are needed ({negative_comment_count} change request(s) found)")
+            return True
+
+        if has_approval and negative_comment_count == 0:
+            if verbose:
+                print("  ⏭️  No changes needed (PR is approved with no change requests)")
+            return False
+
+        if positive_comment_count > 0 and negative_comment_count == 0:
+            if verbose:
+                print("  ⏭️  No changes needed (only positive feedback found)")
+            return False
+
+        # Default: if unclear, process to be safe
+        if verbose:
+            print("  ⚠️  Unclear feedback, processing to be safe")
+        return True
 
     def _build_issue_prompt(
         self, issue: IssueData, repo_name: str, pr_data: PRData | None = None

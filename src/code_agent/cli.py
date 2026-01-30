@@ -168,6 +168,16 @@ def main(
         click.echo(result.output)
         click.echo()
 
+        # Check if agent decided no changes are needed
+        if not result.repo_path or "No changes needed" in result.output:
+            click.echo(f"{'─'*60}")
+            click.echo("✨ No changes needed - PR feedback is positive!")
+            if pr:
+                existing_pr = agent.github.get_pull_request(repo, pr)
+                click.echo(f"🔗 {existing_pr.html_url}")
+            click.echo(f"{'─'*60}")
+            return
+
         if dry_run:
             click.echo(f"{'─'*60}")
             click.echo("ℹ️  DRY-RUN MODE: Changes not pushed")

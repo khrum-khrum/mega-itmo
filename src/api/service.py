@@ -134,6 +134,11 @@ class CodeAgentService:
                 logger.error(f"Agent failed: {result.error}")
                 return
 
+            # Check if agent actually made changes or decided to skip
+            if not result.repo_path or "No changes needed" in result.output:
+                logger.info(f"✨ No changes needed for PR #{pr_number} - feedback is positive")
+                return
+
             logger.info("Agent completed successfully, committing changes...")
 
             # Commit and push changes (this updates the existing PR)
