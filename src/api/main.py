@@ -5,11 +5,11 @@ This module provides webhook endpoints for the Code Agent only.
 The Review Agent is separate and will have its own API.
 """
 
-import hmac
 import hashlib
+import hmac
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
@@ -76,7 +76,7 @@ def verify_webhook_signature(payload_body: bytes, signature_header: str) -> bool
 
 
 @app.get("/")
-async def root() -> Dict[str, str]:
+async def root() -> dict[str, str]:
     """Health check endpoint."""
     return {
         "status": "ok",
@@ -86,7 +86,7 @@ async def root() -> Dict[str, str]:
 
 
 @app.get("/health")
-async def health() -> Dict[str, str]:
+async def health() -> dict[str, str]:
     """Health check endpoint for monitoring."""
     return {"status": "healthy"}
 
@@ -97,7 +97,7 @@ async def handle_webhook(
     background_tasks: BackgroundTasks,
     x_github_event: str = Header(None),
     x_hub_signature_256: str = Header(None),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle GitHub webhook events.
 
@@ -151,9 +151,9 @@ async def handle_webhook(
 
 
 async def handle_issue_event(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle issue webhook events.
 
@@ -198,9 +198,9 @@ async def handle_issue_event(
 
 
 async def handle_pr_review_event(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle pull request review webhook events.
 
@@ -261,9 +261,9 @@ async def handle_pr_review_event(
 
 
 async def handle_pr_review_comment_event(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle pull request review comment webhook events.
 
@@ -320,9 +320,9 @@ async def handle_pr_review_comment_event(
 
 
 async def handle_issue_comment_event(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle issue comment webhook events.
 
@@ -419,9 +419,7 @@ def extract_issue_number_from_pr(pr_body: str, pr_number: int) -> int:
             return int(match.group(1))
 
     # Fallback to PR number
-    logger.warning(
-        f"Could not extract issue number from PR body, using PR number {pr_number}"
-    )
+    logger.warning(f"Could not extract issue number from PR body, using PR number {pr_number}")
     return pr_number
 
 
@@ -430,7 +428,7 @@ async def trigger_issue(
     repo: str,
     issue_number: int,
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Manual trigger endpoint for issue processing.
 
@@ -464,7 +462,7 @@ async def trigger_pr(
     issue_number: int,
     pr_number: int,
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Manual trigger endpoint for PR review processing.
 
@@ -479,9 +477,7 @@ async def trigger_pr(
     Returns:
         Response indicating task was scheduled
     """
-    logger.info(
-        f"Manual trigger: Code Agent for PR #{pr_number} (issue #{issue_number}) in {repo}"
-    )
+    logger.info(f"Manual trigger: Code Agent for PR #{pr_number} (issue #{issue_number}) in {repo}")
 
     background_tasks.add_task(
         code_agent_service.handle_pr_review,

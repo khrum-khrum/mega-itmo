@@ -2,9 +2,15 @@
 
 import os
 from dataclasses import dataclass
+from typing import Any, Literal, Self
 
 from src.code_agent.tools import ALL_TOOLS
-from src.utils.github_client import GitHubClient, IssueData, PRData
+from src.utils.github_client import (
+    GitHubClient,
+    IssueData,
+    PRCommentData,
+    PRData,
+)
 from src.utils.langchain_llm import LangChainAgent
 
 # Keywords for PR feedback analysis
@@ -165,9 +171,7 @@ class CodeAgent:
 
         return issue, pr_data
 
-    def _check_if_changes_needed(
-        self, pr_data: PRData, verbose: bool
-    ) -> AgentResult | None:
+    def _check_if_changes_needed(self, pr_data: PRData, verbose: bool) -> AgentResult | None:
         """Check if PR feedback requires changes. Returns early exit result if no changes needed."""
         if not self._should_process_pr_feedback(pr_data, verbose):
             if verbose:
@@ -180,15 +184,11 @@ class CodeAgent:
             )
         return None
 
-    def _prepare_repository(
-        self, repo_name: str, pr_data: PRData | None, verbose: bool
-    ) -> str:
+    def _prepare_repository(self, repo_name: str, pr_data: PRData | None, verbose: bool) -> str:
         """Clone repository and checkout appropriate branch."""
         if verbose:
             if pr_data:
-                print(
-                    f"\nCloning repository and checking out PR branch '{pr_data.head_branch}'..."
-                )
+                print(f"\nCloning repository and checking out PR branch '{pr_data.head_branch}'...")
             else:
                 print(f"\nCloning repository {repo_name}...")
 
@@ -206,6 +206,8 @@ class CodeAgent:
         self, issue: IssueData, repo_name: str, pr_data: PRData | None, verbose: bool
     ) -> dict:
         """Initialize agent and run analysis within the repository directory."""
+        if self.repo_path is None:
+            raise RuntimeError("Repository path not set")
         original_dir = os.getcwd()
         os.chdir(self.repo_path)
 
@@ -223,16 +225,16 @@ class CodeAgent:
 
             if verbose:
                 if pr_data:
-                    print(f"\nRunning agent to address PR feedback...\n")
+                    print("\nRunning agent to address PR feedback...\n")
                 else:
-                    print(f"\nRunning agent to solve the issue...\n")
+                    print("\nRunning agent to solve the issue...\n")
                 print("=" * 60)
 
             result = self.langchain_agent.run(issue_prompt)
 
             if verbose:
                 print("=" * 60)
-                print(f"\nAgent finished execution\n")
+                print("\nAgent finished execution\n")
 
             return result
 
@@ -274,7 +276,7 @@ class CodeAgent:
                     print(f"Changes pushed to {result.branch_name}")
             else:
                 if verbose:
-                    print(f"No changes to commit - PR is already in good state")
+                    print("No changes to commit - PR is already in good state")
 
         except Exception as e:
             raise RuntimeError(f"Failed to commit and push: {str(e)}") from e
@@ -305,7 +307,7 @@ class CodeAgent:
             raise RuntimeError(f"Cannot create PR for failed execution: {result.error}")
 
         if verbose:
-            print(f"\nCreating Pull Request...")
+            print("\nCreating Pull Request...")
 
         try:
             issue = self.github.get_issue(repo_name, issue_number)
@@ -383,7 +385,7 @@ Closes #{issue_number}
         # Make decision based on feedback analysis
         return self._make_feedback_decision(feedback_counts, verbose)
 
-    def _count_feedback_types(self, comments, verbose: bool) -> dict:
+    def _count_feedback_types(self, comments: list[PRCommentData], verbose: bool) -> dict[str, Any]:
         """Count different types of feedback in PR comments."""
         counts = {
             "has_changes_requested": False,
@@ -397,7 +399,12 @@ Closes #{issue_number}
 
         return counts
 
-    def _analyze_comment_sentiment(self, comment, counts: dict, verbose: bool) -> None:
+    def _analyze_comment_sentiment(
+        self,
+        comment: PRCommentData,
+        counts: dict[str, Any],
+        verbose: bool,
+    ) -> None:
         """Analyze a single comment for sentiment and review state."""
         # Check review state
         if comment.review_state == "CHANGES_REQUESTED":
@@ -535,7 +542,9 @@ Closes #{issue_number}
         return """
 ---
 
-**Your task:** This PR already exists for the issue. Review the feedback and comments above, then make the necessary changes to address them. You are working on the existing branch, so your changes will be added as new commits to the PR.
+**Your task:** This PR already exists for the issue. Review the feedback and comments above,
+then make the necessary changes to address them. You are working on the existing branch,
+so your changes will be added as new commits to the PR.
 
 Focus on:
 1. Understanding the feedback from reviewers
@@ -601,11 +610,11 @@ Failing workflows indicate that your code has issues that MUST be fixed.
 Do not consider the task complete until all workflows pass.
 """
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         """Context manager exit - cleanup repository."""
         self.cleanup()
         return False

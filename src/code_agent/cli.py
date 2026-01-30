@@ -134,7 +134,7 @@ def main(
             api_key=api_key,
         )
         if verbose:
-            click.echo(f"Code Agent initialized")
+            click.echo("Code Agent initialized")
     except ValueError as e:
         click.echo(f"Error: Code Agent error: {e}", err=True)
         sys.exit(1)
@@ -205,7 +205,7 @@ def main(
                 if pr:
                     # PR already exists, just show the URL
                     existing_pr = agent.github.get_pull_request(repo, pr)
-                    click.echo(f"\nChanges pushed to existing Pull Request")
+                    click.echo("\nChanges pushed to existing Pull Request")
                     click.echo(f"PR: {existing_pr.html_url}")
                 else:
                     # Create new PR
@@ -216,7 +216,7 @@ def main(
                         verbose=verbose,
                     )
 
-                    click.echo(f"\nPull Request created successfully")
+                    click.echo("\nPull Request created successfully")
                     click.echo(f"PR: {pr_url}")
 
             except RuntimeError as e:

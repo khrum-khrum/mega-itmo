@@ -6,7 +6,7 @@ from pathlib import Path
 
 import git
 from dotenv import load_dotenv
-from github import Github, GithubException, UnknownObjectException, BadCredentialsException
+from github import BadCredentialsException, Github, GithubException, UnknownObjectException
 from github.Issue import Issue
 from github.PullRequest import PullRequest
 from github.Repository import Repository
@@ -80,7 +80,9 @@ class PRData:
     comments: list[PRCommentData]
 
     def __str__(self) -> str:
-        comments_str = "\n\n".join(str(c) for c in self.comments) if self.comments else "No comments"
+        comments_str = (
+            "\n\n".join(str(c) for c in self.comments) if self.comments else "No comments"
+        )
         return (
             f"Pull Request #{self.number}: {self.title}\n"
             f"Status: {self.state}\n"
@@ -163,9 +165,8 @@ class GitHubClient:
                     f"Verify the repository exists and your token has access."
                 ) from e
             else:
-                raise RuntimeError(
-                    f"GitHub API error when accessing '{repo_name}': {e.data.get('message', str(e))}"
-                ) from e
+                msg = e.data.get("message", str(e))
+                raise RuntimeError(f"GitHub API error when accessing '{repo_name}': {msg}") from e
 
     def get_issue(self, repo_name: str, issue_number: int) -> IssueData:
         """
@@ -290,7 +291,9 @@ class GitHubClient:
                             author=review.user.login,
                             body=review.body or f"Review: {review.state}",
                             comment_type="review",
-                            created_at=review.submitted_at.isoformat() if review.submitted_at else "",
+                            created_at=(
+                                review.submitted_at.isoformat() if review.submitted_at else ""
+                            ),
                             review_state=review.state,
                         )
                     )
@@ -511,15 +514,11 @@ class GitHubClient:
                         f"Pull Request from {head_branch} to {base} already exists"
                     ) from e
                 elif "no commits between" in error_message.lower():
-                    raise RuntimeError(
-                        f"No changes between {base} and {head_branch}"
-                    ) from e
+                    raise RuntimeError(f"No changes between {base} and {head_branch}") from e
                 else:
                     raise RuntimeError(f"Validation error: {error_message}") from e
             elif e.status == 403:
-                raise RuntimeError(
-                    f"Permission denied: Cannot create PR in {repo_name}"
-                ) from e
+                raise RuntimeError(f"Permission denied: Cannot create PR in {repo_name}") from e
             else:
                 raise RuntimeError(
                     f"Failed to create Pull Request: {e.data.get('message', str(e))}"
@@ -558,7 +557,8 @@ class GitHubClient:
             status_map = {}
             for run in workflow_runs:
                 # Status: queued, in_progress, completed
-                # Conclusion: success, failure, neutral, cancelled, skipped, timed_out, action_required
+                # Conclusion: success, failure, neutral, cancelled, skipped,
+                # timed_out, action_required
                 if run.status == "completed":
                     status_map[run.name] = run.conclusion or "unknown"
                 else:
@@ -567,6 +567,5 @@ class GitHubClient:
             return status_map
 
         except GithubException as e:
-            raise RuntimeError(
-                f"Failed to get workflow runs for commit {commit_sha}: {e.data.get('message', str(e))}"
-            ) from e
+            msg = e.data.get("message", str(e))
+            raise RuntimeError(f"Failed to get workflow runs for commit {commit_sha}: {msg}") from e

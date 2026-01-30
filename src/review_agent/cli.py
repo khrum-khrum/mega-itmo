@@ -73,7 +73,8 @@ def main(
         python -m src.review_agent.cli --repo owner/repo --pr 123 --execute
 
         # Use different model
-        python -m src.review_agent.cli --repo owner/repo --pr 123 --model anthropic/claude-3.5-sonnet
+        python -m src.review_agent.cli --repo owner/repo --pr 123 \\
+            --model anthropic/claude-3.5-sonnet
 
         # With verbose output
         python -m src.review_agent.cli --repo owner/repo --pr 123 -v
@@ -160,6 +161,7 @@ def main(
         click.echo(f"\nError: {str(e)}", err=True)
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 

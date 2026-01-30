@@ -5,11 +5,11 @@ This module provides webhook endpoints for the Review Agent only.
 The Code Agent is separate and has its own API.
 """
 
-import hmac
 import hashlib
+import hmac
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
@@ -76,7 +76,7 @@ def verify_webhook_signature(payload_body: bytes, signature_header: str) -> bool
 
 
 @app.get("/")
-async def root() -> Dict[str, str]:
+async def root() -> dict[str, str]:
     """Health check endpoint."""
     return {
         "status": "ok",
@@ -86,7 +86,7 @@ async def root() -> Dict[str, str]:
 
 
 @app.get("/health")
-async def health() -> Dict[str, str]:
+async def health() -> dict[str, str]:
     """Health check endpoint for monitoring."""
     return {"status": "healthy"}
 
@@ -97,7 +97,7 @@ async def handle_webhook(
     background_tasks: BackgroundTasks,
     x_github_event: str = Header(None),
     x_hub_signature_256: str = Header(None),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle GitHub webhook events.
 
@@ -143,9 +143,9 @@ async def handle_webhook(
 
 
 async def handle_pull_request_event(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Handle pull request webhook events.
 
@@ -178,9 +178,7 @@ async def handle_pull_request_event(
 
     # Log the action
     if action == "opened":
-        logger.info(
-            f"Scheduling Review Agent for new PR #{pr_number} in {repo_full_name}"
-        )
+        logger.info(f"Scheduling Review Agent for new PR #{pr_number} in {repo_full_name}")
     elif action == "synchronize":
         logger.info(
             f"Scheduling Review Agent for PR #{pr_number} "
@@ -205,7 +203,7 @@ async def trigger_review(
     repo: str,
     pr_number: int,
     background_tasks: BackgroundTasks,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Manual trigger endpoint for PR review processing.
 

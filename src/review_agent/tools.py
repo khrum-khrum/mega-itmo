@@ -1,12 +1,17 @@
 """LangChain tools for Review Agent."""
 
+from __future__ import annotations
+
 import os
+import re
 import subprocess
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from langchain.tools import tool
-import re
+
+if TYPE_CHECKING:
+    from src.utils.github_client import GitHubClient
 
 
 # Helper functions for search_code_in_pr
@@ -14,7 +19,7 @@ def _search_in_file_for_pr(file_path: Path, pattern: str) -> list[str]:
     """Search for pattern in a single file and return matches."""
     matches = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 if re.search(pattern, line):
                     matches.append(f"{file_path}:{line_num}: {line.strip()}")
@@ -56,7 +61,7 @@ def _resolve_pr_commit_sha(commit_sha: str) -> str:
     return result.stdout.strip()
 
 
-def _get_pr_github_client():
+def _get_pr_github_client() -> tuple[GitHubClient, str]:
     """Get GitHub client and validate required environment variables."""
     repo_name = os.getenv("GITHUB_REPO")
     token = os.getenv("GITHUB_TOKEN")
@@ -143,7 +148,7 @@ def read_pr_file(file_path: Annotated[str, "Path to the file to read"]) -> str:
         if not full_path.exists():
             return f"Error: File {file_path} not found"
 
-        with open(full_path, "r", encoding="utf-8") as f:
+        with open(full_path, encoding="utf-8") as f:
             content = f.read()
 
         return f"Content of {file_path}:\n\n{content}"
@@ -218,7 +223,9 @@ def run_test_command(
         if result.returncode != 0:
             return f"Command failed (exit code {result.returncode}):\n{output}"
 
-        return f"Command output:\n{output}" if output else "Command executed successfully (no output)"
+        return (
+            f"Command output:\n{output}" if output else "Command executed successfully (no output)"
+        )
     except subprocess.TimeoutExpired:
         return "Error: Command timed out after 60 seconds"
     except Exception as e:
@@ -244,13 +251,15 @@ def analyze_pr_complexity(file_path: Annotated[str, "Path to file to analyze"]) 
         if not full_path.exists():
             return f"Error: File {file_path} not found"
 
-        with open(full_path, "r", encoding="utf-8") as f:
+        with open(full_path, encoding="utf-8") as f:
             content = f.read()
             lines = content.split("\n")
 
         # Basic metrics
         total_lines = len(lines)
-        code_lines = len([line for line in lines if line.strip() and not line.strip().startswith("#")])
+        code_lines = len(
+            [line for line in lines if line.strip() and not line.strip().startswith("#")]
+        )
 
         # Count functions/methods (simple heuristic for Python)
         function_count = len([line for line in lines if line.strip().startswith("def ")])
@@ -373,7 +382,9 @@ If workflows should exist, this could indicate an issue with the PR.
 """
 
         all_passed, has_failures, has_pending = _analyze_pr_workflow_status(workflows)
-        return _format_pr_workflow_output(workflows, resolved_sha, all_passed, has_failures, has_pending)
+        return _format_pr_workflow_output(
+            workflows, resolved_sha, all_passed, has_failures, has_pending
+        )
 
     except Exception as e:
         return f"Error checking GitHub workflows: {str(e)}"

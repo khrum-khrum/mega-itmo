@@ -1,6 +1,7 @@
 """LangChain-based LLM client with OpenRouter integration."""
 
 import os
+from collections.abc import Iterator
 from typing import Any
 
 from dotenv import load_dotenv
@@ -19,10 +20,12 @@ class LangChainAgent:
 
     SYSTEM_PROMPT = """You are an expert software engineer working with GitHub repositories.
 
-Your task is to analyze GitHub Issues and implement solutions by modifying code in the cloned repository.
+Your task is to analyze GitHub Issues and implement solutions by modifying code
+in the cloned repository.
 
 WORKFLOW:
-1. **Understand the Issue**: Carefully read the issue description to understand what needs to be done
+1. **Understand the Issue**: Carefully read the issue description to understand
+   what needs to be done
 2. **Explore the Repository**: Use available tools to understand the codebase:
    - Use `get_file_tree` to see the project structure
    - Use `list_directory` to explore specific directories
@@ -84,7 +87,7 @@ After implementing the solution, summarize what you did and what files were chan
         resolved_base_url = base_url or os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 
         # Initialize OpenAI-compatible client pointing to OpenRouter
-        self.llm = ChatOpenAI(
+        self.llm = ChatOpenAI(  # type: ignore[call-arg]
             model=model,
             openai_api_key=self.api_key,
             openai_api_base=resolved_base_url,
@@ -93,7 +96,7 @@ After implementing the solution, summarize what you did and what files were chan
         )
 
         # Create the agent using the new LangChain 1.2+ API
-        self.agent = create_agent(
+        self.agent: Any = create_agent(
             self.llm,
             tools=tools,
             system_prompt=self.SYSTEM_PROMPT,
@@ -117,13 +120,17 @@ After implementing the solution, summarize what you did and what files were chan
             # Extract the final message content for compatibility
             final_message = result["messages"][-1]
             return {
-                "output": final_message.content if hasattr(final_message, "content") else str(final_message),
+                "output": (
+                    final_message.content
+                    if hasattr(final_message, "content")
+                    else str(final_message)
+                ),
                 "messages": result["messages"],
             }
         except Exception as e:
             raise RuntimeError(f"Error running agent: {str(e)}") from e
 
-    def stream(self, issue_description: str):
+    def stream(self, issue_description: str) -> Iterator[Any]:
         """
         Stream the agent execution for real-time output.
 
@@ -135,10 +142,9 @@ After implementing the solution, summarize what you did and what files were chan
         """
         try:
             input_message = {"role": "user", "content": issue_description}
-            for step in self.agent.stream(
+            yield from self.agent.stream(
                 {"messages": [input_message]},
                 stream_mode="values",
-            ):
-                yield step
+            )
         except Exception as e:
             raise RuntimeError(f"Error streaming agent: {str(e)}") from e

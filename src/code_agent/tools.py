@@ -1,12 +1,17 @@
 """LangChain tools for Code Agent."""
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from langchain.tools import tool
+
+if TYPE_CHECKING:
+    from src.utils.github_client import GitHubClient
 
 
 # Helper functions for search_code
@@ -14,7 +19,7 @@ def _search_in_file(file_path: Path, pattern: str) -> list[str]:
     """Search for pattern in a single file and return matches."""
     matches = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 if re.search(pattern, line):
                     matches.append(f"{file_path}:{line_num}: {line.strip()}")
@@ -53,16 +58,10 @@ NON_ESSENTIAL_DIRS = {
 
 def _filter_tree_entries(entries: list[Path]) -> list[Path]:
     """Filter out non-essential directories and hidden files."""
-    return [
-        e
-        for e in entries
-        if e.name not in NON_ESSENTIAL_DIRS and not e.name.startswith(".")
-    ]
+    return [e for e in entries if e.name not in NON_ESSENTIAL_DIRS and not e.name.startswith(".")]
 
 
-def _build_tree_recursive(
-    current_path: Path, prefix: str, depth: int, max_depth: int
-) -> list[str]:
+def _build_tree_recursive(current_path: Path, prefix: str, depth: int, max_depth: int) -> list[str]:
     """Recursively build tree structure."""
     if depth > max_depth:
         return []
@@ -79,9 +78,7 @@ def _build_tree_recursive(
 
             if entry.is_dir() and depth < max_depth:
                 extension = "    " if is_last else "│   "
-                items.extend(
-                    _build_tree_recursive(entry, prefix + extension, depth + 1, max_depth)
-                )
+                items.extend(_build_tree_recursive(entry, prefix + extension, depth + 1, max_depth))
     except PermissionError:
         pass
 
@@ -106,7 +103,7 @@ def _resolve_commit_sha(commit_sha: str) -> str:
     return result.stdout.strip()
 
 
-def _get_github_client():
+def _get_github_client() -> tuple[GitHubClient, str]:
     """Get GitHub client and validate required environment variables."""
     repo_name = os.getenv("GITHUB_REPO")
     token = os.getenv("GITHUB_TOKEN")
@@ -170,7 +167,7 @@ def read_file(file_path: Annotated[str, "Path to the file to read"]) -> str:
         if not full_path.exists():
             return f"Error: File {file_path} not found"
 
-        with open(full_path, "r", encoding="utf-8") as f:
+        with open(full_path, encoding="utf-8") as f:
             content = f.read()
 
         return f"Content of {file_path}:\n\n{content}"
@@ -179,9 +176,7 @@ def read_file(file_path: Annotated[str, "Path to the file to read"]) -> str:
 
 
 @tool
-def list_directory(
-    directory_path: Annotated[str, "Path to the directory to list"] = "."
-) -> str:
+def list_directory(directory_path: Annotated[str, "Path to the directory to list"] = ".") -> str:
     """
     List all files and directories in a given path.
 
@@ -406,7 +401,9 @@ def run_command(
         if result.returncode != 0:
             return f"Command failed (exit code {result.returncode}):\n{output}"
 
-        return f"Command output:\n{output}" if output else "Command executed successfully (no output)"
+        return (
+            f"Command output:\n{output}" if output else "Command executed successfully (no output)"
+        )
     except subprocess.TimeoutExpired:
         return "Error: Command timed out after 30 seconds"
     except Exception as e:
@@ -414,7 +411,9 @@ def run_command(
 
 
 @tool
-def get_git_diff(file_path: Annotated[str, "Path to file to check"] = None) -> str:
+def get_git_diff(
+    file_path: Annotated[str | None, "Path to file to check"] = None,
+) -> str:
     """
     Get git diff for changes made in the working directory.
 

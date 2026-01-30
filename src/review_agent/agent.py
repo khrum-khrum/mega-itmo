@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from typing import Any, Literal, Self
 
 from src.review_agent.tools import ALL_REVIEW_TOOLS
 from src.utils.github_client import GitHubClient
@@ -114,7 +115,8 @@ TOOL USAGE (in this order):
 REVIEW FEEDBACK:
 Provide comprehensive review feedback in the form of comments. You should:
 - **POSITIVE FEEDBACK**: Acknowledge what's implemented correctly
-- **CRITICAL ISSUES**: Highlight missing requirements, failing tests, failing workflows, bugs, security issues
+- **CRITICAL ISSUES**: Highlight missing requirements, failing tests, failing workflows,
+  bugs, security issues
 - **SUGGESTIONS**: Recommend improvements for code quality and best practices
 - **QUESTIONS**: Ask for clarification when needed
 
@@ -219,9 +221,7 @@ Be thorough, rigorous, and prioritize correctness over speed.
         if issue_details:
             print(f"   Related Issue: #{pr_data.issue_number}")
 
-    def _clone_and_prepare_repo(
-        self, repo_name: str, pr_data: PRData, verbose: bool
-    ) -> str:
+    def _clone_and_prepare_repo(self, repo_name: str, pr_data: PRData, verbose: bool) -> str:
         """Clone repository and checkout PR branch."""
         if verbose:
             print(f"\nCloning repository {repo_name} (branch: {pr_data.head_branch})...")
@@ -238,6 +238,8 @@ Be thorough, rigorous, and prioritize correctness over speed.
         self, pr_data: PRData, issue_details: str | None, verbose: bool
     ) -> ReviewResult:
         """Initialize review agent and run analysis."""
+        if self.repo_path is None:
+            raise RuntimeError("Repository path not set")
         original_dir = os.getcwd()
         os.chdir(self.repo_path)
 
@@ -258,14 +260,14 @@ Be thorough, rigorous, and prioritize correctness over speed.
             review_prompt = self._build_review_prompt(pr_data, issue_details)
 
             if verbose:
-                print(f"\nRunning review agent...\n")
+                print("\nRunning review agent...\n")
                 print("=" * 60)
 
             result = self.langchain_agent.run(review_prompt)
 
             if verbose:
                 print("=" * 60)
-                print(f"\nReview agent finished\n")
+                print("\nReview agent finished\n")
 
             # Parse review result
             review_output = result.get("output", "")
@@ -378,7 +380,7 @@ Be thorough, rigorous, and prioritize correctness over speed.
 
         return pr_data, issue_details
 
-    def _extract_issue_from_pr(self, repo_name: str, pr) -> tuple[int | None, str | None]:
+    def _extract_issue_from_pr(self, repo_name: str, pr: Any) -> tuple[int | None, str | None]:
         """Extract issue number from PR and fetch issue details."""
         import re
 
@@ -406,7 +408,7 @@ Be thorough, rigorous, and prioritize correctness over speed.
 
         return issue_number, issue_details
 
-    def _collect_pr_changes(self, pr) -> tuple[list[str], str]:
+    def _collect_pr_changes(self, pr: Any) -> tuple[list[str], str]:
         """Collect changed files and diff from PR."""
         changed_files = [f.filename for f in pr.get_files()]
 
@@ -463,7 +465,8 @@ Be thorough, rigorous, and prioritize correctness over speed.
 
 {issue_details}
 
-**CRITICAL:** You MUST verify that the PR implementation addresses ALL requirements from the issue above.
+**CRITICAL:** You MUST verify that the PR implementation addresses ALL requirements
+from the issue above.
 The PR should only be approved if it fully implements the issue requirements and the code works.
 
 """
@@ -510,7 +513,8 @@ Use the available tools to:
 2. Read changed files in detail using read_pr_file
 3. Search for related code using search_code_in_pr
 4. **RUN TESTS** using run_test_command (MANDATORY - must verify code works!)
-5. **CHECK WORKFLOWS** using check_pr_workflows with commit_sha='HEAD' (MANDATORY - must verify pipelines pass!)
+5. **CHECK WORKFLOWS** using check_pr_workflows with commit_sha='HEAD'
+   (MANDATORY - must verify pipelines pass!)
 6. Query library documentation using query_library_docs if needed
 7. Analyze code complexity using analyze_pr_complexity
 
@@ -550,7 +554,7 @@ Provide your review in this format:
 ]
 """
 
-    def _create_review_agent(self):
+    def _create_review_agent(self) -> Any:
         """
         Create a review agent with custom system prompt.
 
@@ -560,7 +564,7 @@ Provide your review in this format:
         from langchain.agents import create_agent
         from langchain_openai import ChatOpenAI
 
-        llm = ChatOpenAI(
+        llm = ChatOpenAI(  # type: ignore[call-arg]
             model=self.model,
             openai_api_key=self.api_key,
             openai_api_base="https://openrouter.ai/api/v1",
@@ -663,11 +667,11 @@ Provide your review in this format:
 """
         return body
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         """Context manager exit - cleanup."""
         self.cleanup()
         return False

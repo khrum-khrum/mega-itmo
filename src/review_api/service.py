@@ -4,10 +4,12 @@ Service layer for Review Agent API.
 This module wraps the Review Agent CLI functionality to be used by FastAPI.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 
-from src.review_agent.agent import ReviewAgent
+from src.review_agent.agent import ReviewAgent, ReviewResult
 from src.utils.github_client import GitHubClient
 
 logger = logging.getLogger(__name__)
@@ -16,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ReviewAgentService:
     """Service for executing Review Agent tasks."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Review Agent service."""
         self.github_token = os.getenv("GITHUB_TOKEN")
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
@@ -73,7 +75,7 @@ class ReviewAgentService:
             api_key=self.openrouter_api_key,
         )
 
-    def _run_review(self, repo_full_name: str, pr_number: int, agent: ReviewAgent):
+    def _run_review(self, repo_full_name: str, pr_number: int, agent: ReviewAgent) -> ReviewResult:
         """Run review agent on the PR."""
         logger.info(f"Analyzing PR #{pr_number}...")
         return agent.review_pull_request(
@@ -83,7 +85,11 @@ class ReviewAgentService:
         )
 
     def _submit_or_log_review(
-        self, repo_full_name: str, pr_number: int, agent: ReviewAgent, result
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        agent: ReviewAgent,
+        result: ReviewResult,
     ) -> None:
         """Submit review to GitHub or log dry-run results."""
         if self.execute:
@@ -97,7 +103,7 @@ class ReviewAgentService:
             logger.info(f"Successfully submitted review for PR #{pr_number}")
         else:
             logger.info(
-                f"Dry-run mode: Review not submitted to GitHub. "
-                f"Set REVIEW_AGENT_EXECUTE=true to enable."
+                "Dry-run mode: Review not submitted to GitHub. "
+                "Set REVIEW_AGENT_EXECUTE=true to enable."
             )
             logger.info(f"Review summary:\n{result.review_summary}")
