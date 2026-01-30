@@ -1,198 +1,294 @@
-"""Основная логика Code Agent."""
+"""Refactored Code Agent using LangChain with tools."""
 
-from dataclasses import dataclass, field
+import os
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
 
+from src.code_agent.tools import ALL_TOOLS
 from src.utils.github_client import GitHubClient, IssueData
-from src.utils.llm_client import GeneratedSolution, LLMClient
+from src.utils.langchain_llm import LangChainAgent
 
 
 @dataclass
-class AgentContext:
-    """Контекст для работы агента."""
+class AgentResult:
+    """Result of agent execution."""
 
-    repo_name: str
-    issue: IssueData
-    repo_structure: str
-    config_files: dict[str, str] = field(default_factory=dict)
-    related_files: dict[str, str] = field(default_factory=dict)
-
-    @property
-    def all_context_files(self) -> dict[str, str]:
-        """Все файлы для контекста LLM."""
-        return {**self.config_files, **self.related_files}
+    success: bool
+    output: str
+    repo_path: str
+    branch_name: str
+    error: str | None = None
 
 
 class CodeAgent:
     """
-    Агент для генерации кода на основе GitHub Issues.
+    Refactored Code Agent using LangChain with custom tools.
 
-    Работает с любыми репозиториями и любыми языками программирования.
+    This agent:
+    1. Clones the target repository
+    2. Uses LangChain agent with tools to analyze and modify code
+    3. Commits and pushes changes
+    4. Creates Pull Request
     """
 
     def __init__(
         self,
         github_client: GitHubClient,
-        llm_client: LLMClient,
+        model: str = "meta-llama/llama-3.1-70b-instruct",
+        api_key: str | None = None,
     ):
         """
-        Инициализация агента.
+        Initialize the Code Agent.
 
         Args:
-            github_client: Клиент GitHub API
-            llm_client: Клиент LLM
+            github_client: GitHub API client
+            model: LLM model to use (OpenRouter format)
+            api_key: OpenRouter API key
         """
         self.github = github_client
-        self.llm = llm_client
+        self.model = model
+        self.api_key = api_key
+        self.langchain_agent: LangChainAgent | None = None
+        self.repo_path: str | None = None
 
-    def analyze_issue(self, repo_name: str, issue_number: int) -> AgentContext:
+    def analyze_and_solve_issue(
+        self,
+        repo_name: str,
+        issue_number: int,
+        verbose: bool = False,
+    ) -> AgentResult:
         """
-        Анализирует Issue и собирает контекст репозитория.
+        Analyze a GitHub Issue and generate a solution.
 
         Args:
-            repo_name: Имя репозитория (owner/repo)
-            issue_number: Номер Issue
+            repo_name: Repository name (owner/repo)
+            issue_number: Issue number
+            verbose: Whether to print verbose output
 
         Returns:
-            Контекст с информацией для генерации кода
+            AgentResult with execution details
         """
-        # Получаем Issue
-        issue = self.github.get_issue(repo_name, issue_number)
+        try:
+            # 1. Get Issue data
+            if verbose:
+                print(f"\n📋 Fetching Issue #{issue_number}...")
+            issue = self.github.get_issue(repo_name, issue_number)
 
-        # Получаем структуру репозитория (для понимания проекта)
-        repo_structure = self.github.get_repo_structure(repo_name)
+            # 2. Clone repository
+            if verbose:
+                print(f"\n📦 Cloning repository {repo_name}...")
+            self.repo_path = self.github.clone_repository(repo_name)
 
-        # Получаем конфиги (для понимания стека)
-        config_files = self.github.get_config_files(repo_name)
+            if verbose:
+                print(f"✅ Repository cloned to: {self.repo_path}")
 
-        # Получаем файлы, упомянутые в Issue
-        related_files = self.github.find_related_files(repo_name, issue)
+            # 3. Change working directory to repo
+            original_dir = os.getcwd()
+            os.chdir(self.repo_path)
 
-        return AgentContext(
-            repo_name=repo_name,
-            issue=issue,
-            repo_structure=repo_structure,
-            config_files=config_files,
-            related_files=related_files,
-        )
+            try:
+                # 4. Initialize LangChain agent with tools
+                if verbose:
+                    print(f"\n🤖 Initializing LangChain agent with {len(ALL_TOOLS)} tools...")
 
-    def generate_solution(self, context: AgentContext) -> GeneratedSolution:
+                self.langchain_agent = LangChainAgent(
+                    tools=ALL_TOOLS,
+                    api_key=self.api_key,
+                    model=self.model,
+                )
+
+                # 5. Prepare issue description for the agent
+                issue_prompt = self._build_issue_prompt(issue, repo_name)
+
+                # 6. Run the agent
+                if verbose:
+                    print(f"\n🧠 Running agent to solve the issue...\n")
+                    print("=" * 60)
+
+                result = self.langchain_agent.run(issue_prompt)
+
+                if verbose:
+                    print("=" * 60)
+                    print(f"\n✅ Agent finished execution\n")
+
+                # 7. Create branch name
+                branch_name = f"agent/issue-{issue_number}"
+
+                return AgentResult(
+                    success=True,
+                    output=result.get("output", ""),
+                    repo_path=self.repo_path,
+                    branch_name=branch_name,
+                )
+
+            finally:
+                # Always return to original directory
+                os.chdir(original_dir)
+
+        except Exception as e:
+            return AgentResult(
+                success=False,
+                output="",
+                repo_path=self.repo_path or "",
+                branch_name="",
+                error=str(e),
+            )
+
+    def commit_and_push(
+        self,
+        result: AgentResult,
+        commit_message: str,
+        verbose: bool = False,
+    ) -> None:
         """
-        Генерирует решение для Issue.
+        Commit and push changes made by the agent.
 
         Args:
-            context: Контекст с информацией об Issue и репозитории
+            result: AgentResult from analyze_and_solve_issue
+            commit_message: Commit message
+            verbose: Whether to print verbose output
 
-        Returns:
-            Сгенерированное решение с файлами для создания/изменения
+        Raises:
+            RuntimeError: If commit/push fails
         """
-        return self.llm.generate_solution(
-            issue_title=context.issue.title,
-            issue_body=context.issue.body,
-            repo_structure=context.repo_structure,
-            existing_files=context.all_context_files if context.all_context_files else None,
-        )
+        if not result.success:
+            raise RuntimeError(f"Cannot commit failed execution: {result.error}")
+
+        if verbose:
+            print(f"\n📝 Committing and pushing changes to branch '{result.branch_name}'...")
+
+        try:
+            self.github.commit_and_push_changes(
+                repo_path=result.repo_path,
+                branch_name=result.branch_name,
+                commit_message=commit_message,
+            )
+
+            if verbose:
+                print(f"✅ Changes pushed to {result.branch_name}")
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to commit and push: {str(e)}") from e
 
     def create_pull_request(
         self,
-        context: AgentContext,
-        solution: GeneratedSolution,
+        repo_name: str,
+        issue_number: int,
+        result: AgentResult,
+        verbose: bool = False,
     ) -> str:
         """
-        Создаёт Pull Request с решением.
+        Create a Pull Request with the solution.
 
         Args:
-            context: Контекст Issue
-            solution: Сгенерированное решение
+            repo_name: Repository name (owner/repo)
+            issue_number: Issue number
+            result: AgentResult from analyze_and_solve_issue
+            verbose: Whether to print verbose output
 
         Returns:
-            URL созданного Pull Request
+            Pull Request URL
 
         Raises:
-            RuntimeError: При ошибках создания PR
+            RuntimeError: If PR creation fails
         """
-        repo = self.github.get_repo(context.repo_name)
-        base_branch = repo.default_branch
-        issue_number = context.issue.number
+        if not result.success:
+            raise RuntimeError(f"Cannot create PR for failed execution: {result.error}")
 
-        # Создаём имя ветки
-        branch_name = f"agent/issue-{issue_number}"
-
-        # 1. Создаём ветку
-        try:
-            created_ref = self.github.create_branch(
-                repo_name=context.repo_name,
-                branch_name=branch_name,
-                source_branch=base_branch,
-            )
-            # Извлекаем имя ветки из ref (refs/heads/branch-name -> branch-name)
-            # refs/heads/agent/issue-3 -> agent/issue-3
-            if created_ref.startswith("refs/heads/"):
-                actual_branch = created_ref[len("refs/heads/") :]
-            else:
-                actual_branch = branch_name
-        except RuntimeError as e:
-            raise RuntimeError(f"Не удалось создать ветку: {e}") from e
-
-        # 2. Коммитим файлы
-        changes = [
-            {
-                "file_path": change.file_path,
-                "content": change.content,
-                "action": change.action,
-            }
-            for change in solution.changes
-        ]
+        if verbose:
+            print(f"\n🚀 Creating Pull Request...")
 
         try:
-            self.github.commit_files(
-                repo_name=context.repo_name,
-                changes=changes,
-                commit_message=solution.commit_message,
-                branch=actual_branch,
-            )
-        except RuntimeError as e:
-            raise RuntimeError(f"Не удалось закоммитить файлы: {e}") from e
+            issue = self.github.get_issue(repo_name, issue_number)
 
-        # 3. Создаём Pull Request
-        pr_title = f"[Agent] Fix #{issue_number}: {context.issue.title}"
-        pr_body = f"""## Автоматическое решение Issue #{issue_number}
+            pr_title = f"[Agent] Fix #{issue_number}: {issue.title}"
+            pr_body = f"""## Автоматическое решение Issue #{issue_number}
 
-**Оригинальный Issue:** {context.issue.url}
+**Оригинальный Issue:** {issue.url}
 
-### Описание изменений
-{solution.explanation}
-
-### Изменённые файлы
-{self._format_changes_list(solution.changes)}
-
-### Commit message
-```
-{solution.commit_message}
-```
+### Решение
+{result.output}
 
 ---
 
 Closes #{issue_number}
 
-*🤖 Этот Pull Request был автоматически создан Code Agent*
+*🤖 Этот Pull Request был автоматически создан Code Agent с использованием LangChain*
 """
 
-        try:
             pr = self.github.create_pull_request(
-                repo_name=context.repo_name,
+                repo_name=repo_name,
                 title=pr_title,
                 body=pr_body,
-                head_branch=actual_branch,
-                base_branch=base_branch,
+                head_branch=result.branch_name,
             )
-            return pr.html_url
-        except RuntimeError as e:
-            raise RuntimeError(f"Не удалось создать Pull Request: {e}") from e
 
-    def _format_changes_list(self, changes: list) -> str:
-        """Форматирует список изменений для PR описания."""
-        lines = []
-        for change in changes:
-            action_emoji = {"create": "✨", "update": "📝", "delete": "🗑️"}.get(change.action, "📄")
-            lines.append(f"- {action_emoji} `{change.file_path}` ({change.action})")
-        return "\n".join(lines)
+            if verbose:
+                print(f"✅ Pull Request created: {pr.html_url}")
+
+            return pr.html_url
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to create Pull Request: {str(e)}") from e
+
+    def cleanup(self, verbose: bool = False) -> None:
+        """
+        Clean up cloned repository.
+
+        Args:
+            verbose: Whether to print verbose output
+        """
+        if self.repo_path and os.path.exists(self.repo_path):
+            if verbose:
+                print(f"\n🧹 Cleaning up: {self.repo_path}")
+            shutil.rmtree(self.repo_path)
+            self.repo_path = None
+
+    def _build_issue_prompt(self, issue: IssueData, repo_name: str) -> str:
+        """
+        Build a detailed prompt for the agent from the Issue data.
+
+        Args:
+            issue: Issue data
+            repo_name: Repository name
+
+        Returns:
+            Formatted prompt
+        """
+        prompt = f"""# GitHub Issue to Solve
+
+**Repository:** {repo_name}
+**Issue #:** {issue.number}
+**Title:** {issue.title}
+**State:** {issue.state}
+**Labels:** {', '.join(issue.labels) if issue.labels else 'None'}
+**URL:** {issue.url}
+
+## Description
+
+{issue.body}
+
+---
+
+**Your task:** Analyze this issue and implement a solution by modifying the code in the repository.
+
+You have access to tools for:
+- Exploring the repository structure
+- Reading and searching files
+- Creating, updating, and deleting files
+- Running commands
+- Checking git diff
+
+Start by understanding the repository structure, then implement the required changes.
+"""
+        return prompt
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup repository."""
+        self.cleanup()
+        return False

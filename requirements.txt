@@ -1,8 +1,15 @@
 PyGithub>=2.1.1
-openrouter>=0.1.0
+GitPython>=3.1.40
 click>=8.1.7
 python-dotenv>=1.0.0
 pydantic>=2.5.0
+
+# LangChain dependencies
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+langgraph>=0.2.0
 
 # Dev dependencies
 pytest>=7.4.0

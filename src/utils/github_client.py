@@ -1,9 +1,12 @@
-"""Клиент для работы с GitHub API."""
+"""GitHub client for repository operations."""
 
 import os
-import time
+import shutil
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
+import git
 from dotenv import load_dotenv
 from github import Github, GithubException
 from github.Issue import Issue
@@ -15,7 +18,7 @@ load_dotenv()
 
 @dataclass
 class IssueData:
-    """Данные Issue в удобном формате."""
+    """Parsed GitHub Issue data."""
 
     number: int
     title: str
@@ -25,77 +28,70 @@ class IssueData:
     url: str
 
     def __str__(self) -> str:
-        labels_str = ", ".join(self.labels) if self.labels else "нет"
+        labels_str = ", ".join(self.labels) if self.labels else "none"
         return (
             f"Issue #{self.number}: {self.title}\n"
             f"Status: {self.state}\n"
             f"Labels: {labels_str}\n"
             f"URL: {self.url}\n"
             f"---\n"
-            f"{self.body or 'Описание отсутствует'}"
+            f"{self.body or 'No description'}"
         )
 
 
 class GitHubClient:
-    """Клиент для работы с GitHub API."""
+    """
+    GitHub client for Issue management and repository operations.
 
-    # Файлы конфигурации, которые помогают понять стек проекта
-    CONFIG_FILES = [
-        # JavaScript/TypeScript
-        "package.json",
-        "tsconfig.json",
-        ".eslintrc.json",
-        ".prettierrc",
-        # Python
-        "pyproject.toml",
-        "requirements.txt",
-        "setup.py",
-        "setup.cfg",
-        # Go
-        "go.mod",
-        "go.sum",
-        # Rust
-        "Cargo.toml",
-        # Java
-        "pom.xml",
-        "build.gradle",
-        # Ruby
-        "Gemfile",
-        # PHP
-        "composer.json",
-        # .NET
-        "*.csproj",
-        "*.sln",
-        # General
-        "Makefile",
-        "Dockerfile",
-        "docker-compose.yml",
-        ".gitignore",
-        "README.md",
-    ]
+    Supports:
+    - Fetching Issues
+    - Cloning repositories locally
+    - Git operations (commit, push)
+    - Creating Pull Requests
+    """
 
     def __init__(self, token: str | None = None):
         """
-        Инициализация клиента.
+        Initialize GitHub client.
 
         Args:
             token: GitHub Personal Access Token.
-                   Если не передан, берётся из переменной GITHUB_TOKEN.
+                   If not provided, uses GITHUB_TOKEN environment variable.
+
+        Raises:
+            ValueError: If token is not found
         """
         self.token = token or os.getenv("GITHUB_TOKEN")
         if not self.token:
             raise ValueError(
-                "GitHub token не найден. "
-                "Передай его как аргумент или установи переменную GITHUB_TOKEN."
+                "GitHub token not found. "
+                "Pass it as argument or set GITHUB_TOKEN environment variable."
             )
         self._client = Github(self.token)
 
     def get_repo(self, repo_name: str) -> Repository:
-        """Получить репозиторий."""
+        """
+        Get repository object.
+
+        Args:
+            repo_name: Repository name (owner/repo)
+
+        Returns:
+            Repository object
+        """
         return self._client.get_repo(repo_name)
 
     def get_issue(self, repo_name: str, issue_number: int) -> IssueData:
-        """Получить данные Issue."""
+        """
+        Fetch Issue data from GitHub.
+
+        Args:
+            repo_name: Repository name (owner/repo)
+            issue_number: Issue number
+
+        Returns:
+            Parsed Issue data
+        """
         repo = self.get_repo(repo_name)
         issue: Issue = repo.get_issue(issue_number)
 
@@ -108,315 +104,108 @@ class GitHubClient:
             url=issue.html_url,
         )
 
-    def get_repo_structure(
+    def clone_repository(
         self,
         repo_name: str,
-        path: str = "",
-        max_depth: int = 3,
         branch: str | None = None,
+        target_dir: str | None = None,
     ) -> str:
         """
-        Получить структуру файлов репозитория.
+        Clone repository to local filesystem.
 
         Args:
-            repo_name: Имя репозитория
-            path: Начальный путь
-            max_depth: Максимальная глубина
-            branch: Ветка (по умолчанию — default branch)
+            repo_name: Repository name (owner/repo)
+            branch: Branch to clone (default: repository's default branch)
+            target_dir: Target directory (if None, creates temporary directory)
 
         Returns:
-            Строка со структурой файлов
-        """
-        repo = self.get_repo(repo_name)
-        ref = branch or repo.default_branch
-
-        def _get_contents(current_path: str, depth: int) -> list[str]:
-            if depth > max_depth:
-                return ["  " * depth + "..."]
-
-            result = []
-            try:
-                contents = repo.get_contents(current_path, ref=ref)
-                if not isinstance(contents, list):
-                    contents = [contents]
-
-                # Сортируем: сначала папки, потом файлы
-                contents = sorted(contents, key=lambda x: (x.type != "dir", x.name))
-
-                for content in contents:
-                    # Пропускаем скрытые файлы и node_modules
-                    if content.name.startswith(".") and content.name not in [
-                        ".github",
-                        ".gitignore",
-                    ]:
-                        continue
-                    if content.name in [
-                        "node_modules",
-                        "__pycache__",
-                        ".git",
-                        "venv",
-                        "dist",
-                        "build",
-                    ]:
-                        continue
-
-                    indent = "  " * depth
-                    if content.type == "dir":
-                        result.append(f"{indent}📁 {content.name}/")
-                        result.extend(_get_contents(content.path, depth + 1))
-                    else:
-                        # Добавляем размер для больших файлов
-                        size_info = ""
-                        if content.size > 10000:
-                            size_info = f" ({content.size // 1000}KB)"
-                        result.append(f"{indent}📄 {content.name}{size_info}")
-            except Exception:
-                pass
-
-            return result
-
-        lines = _get_contents(path, 0)
-        return "\n".join(lines) if lines else "Репозиторий пуст"
-
-    def get_file_content(
-        self,
-        repo_name: str,
-        file_path: str,
-        branch: str | None = None,
-    ) -> str | None:
-        """
-        Получить содержимое файла.
-
-        Args:
-            repo_name: Имя репозитория
-            file_path: Путь к файлу
-            branch: Ветка (по умолчанию — default branch)
-
-        Returns:
-            Содержимое файла или None
-        """
-        repo = self.get_repo(repo_name)
-        ref = branch or repo.default_branch
-
-        try:
-            content = repo.get_contents(file_path, ref=ref)
-            if isinstance(content, list):
-                return None  # Это директория
-            return content.decoded_content.decode("utf-8")
-        except Exception:
-            return None
-
-    def get_config_files(self, repo_name: str) -> dict[str, str]:
-        """
-        Получить содержимое конфигурационных файлов проекта.
-
-        Помогает понять стек технологий.
-        """
-        configs = {}
-        for config_file in self.CONFIG_FILES:
-            if "*" in config_file:
-                continue  # Пропускаем паттерны
-            content = self.get_file_content(repo_name, config_file)
-            if content:
-                # Ограничиваем размер для промпта
-                if len(content) > 2000:
-                    content = content[:2000] + "\n... (truncated)"
-                configs[config_file] = content
-        return configs
-
-    def find_related_files(
-        self,
-        repo_name: str,
-        issue: IssueData,
-        max_files: int = 5,
-    ) -> dict[str, str]:
-        """
-        Найти файлы, связанные с Issue.
-
-        Ищет упоминания путей в тексте Issue.
-        """
-        import re
-
-        related = {}
-        text = f"{issue.title} {issue.body}"
-
-        # Ищем пути к файлам (любые расширения)
-        # Паттерн: слова с / или . внутри, заканчивающиеся на расширение
-        patterns = [
-            r"[a-zA-Z0-9_\-/]+\.[a-zA-Z0-9]+",  # path/to/file.ext
-            r"`([^`]+\.[a-zA-Z0-9]+)`",  # `file.ext` в backticks
-        ]
-
-        found_paths = set()
-        for pattern in patterns:
-            matches = re.findall(pattern, text)
-            found_paths.update(matches)
-
-        # Пробуем получить каждый файл
-        for path in list(found_paths)[: max_files * 2]:
-            # Очищаем путь
-            path = path.strip("`'\"")
-            if not path or path.startswith("http"):
-                continue
-
-            content = self.get_file_content(repo_name, path)
-            if content:
-                # Ограничиваем размер
-                if len(content) > 5000:
-                    content = content[:5000] + "\n... (truncated)"
-                related[path] = content
-
-                if len(related) >= max_files:
-                    break
-
-        return related
-
-    def create_branch(
-        self,
-        repo_name: str,
-        branch_name: str,
-        source_branch: str | None = None,
-    ) -> str:
-        """
-        Создать новую ветку в репозитории.
-
-        Args:
-            repo_name: Имя репозитория
-            branch_name: Имя новой ветки (без refs/heads/)
-            source_branch: Исходная ветка (по умолчанию — default branch)
-
-        Returns:
-            Полный ref созданной ветки
+            Path to cloned repository
 
         Raises:
-            RuntimeError: Если ветка уже существует или нет прав
+            RuntimeError: If cloning fails
         """
         repo = self.get_repo(repo_name)
-        source = source_branch or repo.default_branch
+        target_branch = branch or repo.default_branch
+
+        # Create target directory
+        if target_dir is None:
+            target_dir = tempfile.mkdtemp(prefix=f"repo_{repo_name.replace('/', '_')}_")
+        else:
+            target_path = Path(target_dir)
+            target_path.mkdir(parents=True, exist_ok=True)
+            target_dir = str(target_path)
+
+        # Build clone URL with authentication
+        clone_url = f"https://{self.token}@github.com/{repo_name}.git"
 
         try:
-            # Получаем SHA коммита исходной ветки
-            source_branch_obj = repo.get_branch(source)
-            source_sha = source_branch_obj.commit.sha
+            # Clone repository (shallow clone for efficiency)
+            git.Repo.clone_from(
+                clone_url,
+                target_dir,
+                branch=target_branch,
+                depth=1,  # Shallow clone - only latest commit
+            )
+            return target_dir
 
-            # Создаём новую ветку
-            ref = repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=source_sha)
-            return ref.ref
+        except git.GitCommandError as e:
+            # Clean up on error
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            raise RuntimeError(f"Failed to clone repository: {str(e)}") from e
 
-        except GithubException as e:
-            if e.status == 422:
-                # Ветка уже существует, пробуем добавить суффикс
-                timestamp = int(time.time())
-                new_branch_name = f"{branch_name}-{timestamp}"
-                try:
-                    ref = repo.create_git_ref(ref=f"refs/heads/{new_branch_name}", sha=source_sha)
-                    return ref.ref
-                except GithubException:
-                    raise RuntimeError(
-                        f"Не удалось создать ветку {branch_name} или {new_branch_name}"
-                    ) from e
-            elif e.status == 403:
-                raise RuntimeError(f"Нет прав для создания ветки в репозитории {repo_name}") from e
-            else:
-                raise RuntimeError(f"Ошибка создания ветки: {e.data.get('message', str(e))}") from e
-
-    def commit_files(
+    def commit_and_push_changes(
         self,
-        repo_name: str,
-        changes: list[dict[str, str]],
+        repo_path: str,
+        branch_name: str,
         commit_message: str,
-        branch: str,
+        author_name: str = "Code Agent",
+        author_email: str = "code-agent@github.com",
     ) -> None:
         """
-        Закоммитить изменения файлов в ветку.
+        Commit and push changes to a branch.
 
         Args:
-            repo_name: Имя репозитория
-            changes: Список изменений
-                [{"file_path": str, "content": str, "action": "create|update|delete"}]
-            commit_message: Сообщение коммита
-            branch: Ветка для коммита
+            repo_path: Path to local repository
+            branch_name: Branch name for commit
+            commit_message: Commit message
+            author_name: Author name
+            author_email: Author email
 
         Raises:
-            RuntimeError: При ошибках коммита
+            RuntimeError: If git operations fail
         """
-        repo = self.get_repo(repo_name)
+        try:
+            repo = git.Repo(repo_path)
 
-        for change in changes:
-            file_path = change["file_path"]
-            content = change["content"]
-            action = change["action"]
-
+            # Create new branch or switch to existing
             try:
-                if action == "create":
-                    # Создаём новый файл
-                    repo.create_file(
-                        path=file_path,
-                        message=commit_message,
-                        content=content,
-                        branch=branch,
-                    )
+                repo.git.checkout("-b", branch_name)
+            except git.GitCommandError:
+                # Branch already exists, switch to it
+                repo.git.checkout(branch_name)
 
-                elif action == "update":
-                    # Обновляем существующий файл
-                    # Сначала получаем SHA файла
-                    file_content = repo.get_contents(file_path, ref=branch)
-                    if isinstance(file_content, list):
-                        raise RuntimeError(f"{file_path} является директорией, не файлом")
+            # Stage all changes
+            repo.git.add(A=True)
 
-                    repo.update_file(
-                        path=file_path,
-                        message=commit_message,
-                        content=content,
-                        sha=file_content.sha,
-                        branch=branch,
-                    )
+            # Check if there are changes to commit
+            if not repo.is_dirty() and not repo.untracked_files:
+                raise RuntimeError("No changes to commit")
 
-                elif action == "delete":
-                    # Удаляем файл
-                    file_content = repo.get_contents(file_path, ref=branch)
-                    if isinstance(file_content, list):
-                        raise RuntimeError(f"{file_path} является директорией, не файлом")
+            # Commit
+            repo.index.commit(
+                commit_message,
+                author=git.Actor(author_name, author_email),
+            )
 
-                    repo.delete_file(
-                        path=file_path,
-                        message=commit_message,
-                        sha=file_content.sha,
-                        branch=branch,
-                    )
+            # Push to remote
+            origin = repo.remote("origin")
+            origin.push(branch_name, set_upstream=True)
 
-                else:
-                    raise ValueError(f"Неизвестное действие: {action}")
-
-            except GithubException as e:
-                if e.status == 404:
-                    if action == "update":
-                        raise RuntimeError(
-                            f"Файл {file_path} не найден для обновления. "
-                            f"Возможно, он был удалён или изменён."
-                        ) from e
-                    elif action == "delete":
-                        # Файл уже удалён, можно игнорировать
-                        continue
-                    else:
-                        # 404 при создании файла может означать что ветка не найдена
-                        error_msg = e.data.get("message", str(e)) if hasattr(e, "data") else str(e)
-                        raise RuntimeError(
-                            f"Ошибка при создании файла {file_path}. "
-                            f"Возможно, ветка '{branch}' не существует. "
-                            f"Детали: {error_msg}"
-                        ) from e
-                elif e.status == 409:
-                    raise RuntimeError(
-                        f"Конфликт при изменении {file_path}. "
-                        f"Файл был изменён с момента анализа."
-                    ) from e
-                elif e.status == 403:
-                    raise RuntimeError(f"Нет прав для изменения {file_path}") from e
-                else:
-                    raise RuntimeError(
-                        f"Ошибка при {action} файла {file_path}: {e.data.get('message', str(e))}"
-                    ) from e
+        except git.GitCommandError as e:
+            raise RuntimeError(f"Git operation failed: {str(e)}") from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to commit and push: {str(e)}") from e
 
     def create_pull_request(
         self,
@@ -427,20 +216,20 @@ class GitHubClient:
         base_branch: str | None = None,
     ) -> PullRequest:
         """
-        Создать Pull Request.
+        Create a Pull Request.
 
         Args:
-            repo_name: Имя репозитория
-            title: Заголовок PR
-            body: Описание PR
-            head_branch: Ветка с изменениями
-            base_branch: Целевая ветка (по умолчанию — default branch)
+            repo_name: Repository name (owner/repo)
+            title: PR title
+            body: PR description
+            head_branch: Branch with changes
+            base_branch: Target branch (default: repository's default branch)
 
         Returns:
-            Созданный Pull Request
+            Created Pull Request object
 
         Raises:
-            RuntimeError: При ошибках создания PR
+            RuntimeError: If PR creation fails
         """
         repo = self.get_repo(repo_name)
         base = base_branch or repo.default_branch
@@ -459,15 +248,19 @@ class GitHubClient:
                 error_message = e.data.get("message", str(e))
                 if "pull request already exists" in error_message.lower():
                     raise RuntimeError(
-                        f"Pull Request из {head_branch} в {base} уже существует"
+                        f"Pull Request from {head_branch} to {base} already exists"
                     ) from e
                 elif "no commits between" in error_message.lower():
-                    raise RuntimeError(f"Нет изменений между {base} и {head_branch}") from e
+                    raise RuntimeError(
+                        f"No changes between {base} and {head_branch}"
+                    ) from e
                 else:
-                    raise RuntimeError(f"Ошибка валидации: {error_message}") from e
+                    raise RuntimeError(f"Validation error: {error_message}") from e
             elif e.status == 403:
-                raise RuntimeError(f"Нет прав для создания Pull Request в {repo_name}") from e
+                raise RuntimeError(
+                    f"Permission denied: Cannot create PR in {repo_name}"
+                ) from e
             else:
                 raise RuntimeError(
-                    f"Ошибка создания Pull Request: {e.data.get('message', str(e))}"
+                    f"Failed to create Pull Request: {e.data.get('message', str(e))}"
                 ) from e

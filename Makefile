@@ -22,8 +22,10 @@ format:
 
 run-example:
 	python -m src.code_agent.cli \
-		--issue 2 \
-		--model tngtech/deepseek-r1t-chimera:free
+		--issue 5 \
+		--model meta-llama/llama-3.1-70b-instruct \
+		--execute \
+		-v
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
