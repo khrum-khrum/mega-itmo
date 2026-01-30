@@ -6,7 +6,7 @@ from pathlib import Path
 
 import git
 from dotenv import load_dotenv
-from github import Github, GithubException
+from github import Github, GithubException, UnknownObjectException, BadCredentialsException
 from github.Issue import Issue
 from github.PullRequest import PullRequest
 from github.Repository import Repository
@@ -80,8 +80,36 @@ class GitHubClient:
 
         Returns:
             Repository object
+
+        Raises:
+            RuntimeError: If repository not found or access denied
         """
-        return self._client.get_repo(repo_name)
+        try:
+            return self._client.get_repo(repo_name)
+        except UnknownObjectException as e:
+            raise RuntimeError(
+                f"Repository '{repo_name}' not found. "
+                f"Please check the repository name format (owner/repo) and ensure it exists."
+            ) from e
+        except BadCredentialsException as e:
+            raise RuntimeError(
+                "Authentication failed. Please check your GITHUB_TOKEN has valid credentials."
+            ) from e
+        except GithubException as e:
+            if e.status == 403:
+                raise RuntimeError(
+                    f"Access denied to repository '{repo_name}'. "
+                    f"Ensure your GITHUB_TOKEN has 'repo' scope and access to this repository."
+                ) from e
+            elif e.status == 404:
+                raise RuntimeError(
+                    f"Repository '{repo_name}' not found. "
+                    f"Verify the repository exists and your token has access."
+                ) from e
+            else:
+                raise RuntimeError(
+                    f"GitHub API error when accessing '{repo_name}': {e.data.get('message', str(e))}"
+                ) from e
 
     def get_issue(self, repo_name: str, issue_number: int) -> IssueData:
         """
@@ -93,18 +121,58 @@ class GitHubClient:
 
         Returns:
             Parsed Issue data
-        """
-        repo = self.get_repo(repo_name)
-        issue: Issue = repo.get_issue(issue_number)
 
-        return IssueData(
-            number=issue.number,
-            title=issue.title,
-            body=issue.body or "",
-            labels=[label.name for label in issue.labels],
-            state=issue.state,
-            url=issue.html_url,
-        )
+        Raises:
+            RuntimeError: If issue not found
+        """
+        try:
+            repo = self.get_repo(repo_name)
+            issue: Issue = repo.get_issue(issue_number)
+
+            return IssueData(
+                number=issue.number,
+                title=issue.title,
+                body=issue.body or "",
+                labels=[label.name for label in issue.labels],
+                state=issue.state,
+                url=issue.html_url,
+            )
+        except UnknownObjectException as e:
+            raise RuntimeError(
+                f"Issue #{issue_number} not found in repository '{repo_name}'."
+            ) from e
+        except GithubException as e:
+            raise RuntimeError(
+                f"Failed to fetch issue #{issue_number}: {e.data.get('message', str(e))}"
+            ) from e
+
+    def get_pull_request(self, repo_name: str, pr_number: int) -> PullRequest:
+        """
+        Fetch Pull Request from GitHub.
+
+        Args:
+            repo_name: Repository name (owner/repo)
+            pr_number: Pull Request number
+
+        Returns:
+            PullRequest object
+
+        Raises:
+            RuntimeError: If pull request not found
+        """
+        try:
+            repo = self.get_repo(repo_name)
+            pr = repo.get_pull(pr_number)
+            return pr
+        except UnknownObjectException as e:
+            raise RuntimeError(
+                f"Pull Request #{pr_number} not found in repository '{repo_name}'. "
+                f"Please verify the PR number is correct."
+            ) from e
+        except GithubException as e:
+            raise RuntimeError(
+                f"Failed to fetch PR #{pr_number}: {e.data.get('message', str(e))}"
+            ) from e
 
     def clone_repository(
         self,

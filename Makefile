@@ -1,14 +1,15 @@
-.PHONY: help install lint format run-example clean
+.PHONY: help install lint format run-example run-review-example clean
 
 include .env
 
 help:
 	@echo "Available targets:"
-	@echo "  make install      - Install dependencies"
-	@echo "  make lint         - Run ruff linter"
-	@echo "  make format       - Format code with black and ruff"
-	@echo "  make run-example  - Run code agent with issue #2"
-	@echo "  make clean        - Remove cache files"
+	@echo "  make install             - Install dependencies"
+	@echo "  make lint                - Run ruff linter"
+	@echo "  make format              - Format code with black and ruff"
+	@echo "  make run-example         - Run code agent with issue #10"
+	@echo "  make run-review-example  - Run review agent with PR (set REPO and PR vars)"
+	@echo "  make clean               - Remove cache files"
 
 install:
 	pip install -r requirements.txt
@@ -22,10 +23,22 @@ format:
 
 run-example:
 	python -m src.code_agent.cli \
-		--issue 8 \
+		--issue 10 \
 		--model upstage/solar-pro-3:free \
 		--execute \
 		-v
+
+run-review-example:
+	@if [ -z "$(REPO)" ] || [ -z "$(PR)" ]; then \
+		echo "Error: REPO and PR variables are required"; \
+		echo "Usage: make run-review-example REPO=owner/repo PR=123"; \
+		exit 1; \
+	fi
+	python -m src.review_agent.cli \
+		--repo $(REPO) \
+		--pr $(PR) \
+		--model meta-llama/llama-3.1-70b-instruct \
+		--verbose
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
