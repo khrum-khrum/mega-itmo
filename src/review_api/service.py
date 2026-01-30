@@ -57,7 +57,7 @@ class ReviewAgentService:
 
             # Run agent to review PR
             logger.info(f"Analyzing PR #{pr_number}...")
-            result = agent.analyze_and_review_pr(
+            result = agent.review_pull_request(
                 repo_name=repo_full_name,
                 pr_number=pr_number,
                 verbose=True,
@@ -75,10 +75,10 @@ class ReviewAgentService:
             # Submit review to GitHub if execute mode is enabled
             if self.execute:
                 logger.info("Submitting review to GitHub...")
-                agent.submit_review_to_github(
+                agent.submit_review(
                     repo_name=repo_full_name,
                     pr_number=pr_number,
-                    result=result,
+                    review_result=result,
                     verbose=True,
                 )
                 logger.info(f"✅ Successfully submitted review for PR #{pr_number}")
