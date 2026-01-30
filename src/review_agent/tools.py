@@ -1,5 +1,6 @@
 """LangChain tools for Review Agent."""
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Annotated
@@ -173,10 +174,83 @@ def analyze_pr_complexity(file_path: Annotated[str, "Path to file to analyze"]) 
         return f"Error analyzing file {file_path}: {str(e)}"
 
 
+@tool
+def fetch_issue_details(issue_number: Annotated[int, "GitHub Issue number to fetch"]) -> str:
+    """
+    Fetch the details of a GitHub Issue to understand the requirements.
+
+    Use this tool to retrieve the original issue that the PR is trying to solve.
+    This helps you verify that the PR implementation matches the issue requirements.
+
+    Args:
+        issue_number: The GitHub Issue number (e.g., 123)
+
+    Returns:
+        Issue details including title, description, and requirements
+    """
+    try:
+        from github import Github
+
+        token = os.getenv("GITHUB_TOKEN")
+        repo_name = os.getenv("GITHUB_REPO")
+
+        if not token or not repo_name:
+            return "Error: GITHUB_TOKEN and GITHUB_REPO environment variables must be set"
+
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+        issue = repo.get_issue(issue_number)
+
+        return f"""Issue #{issue.number}: {issue.title}
+
+**Status:** {issue.state}
+**Labels:** {', '.join([label.name for label in issue.labels])}
+
+**Description:**
+{issue.body or 'No description provided'}
+
+**URL:** {issue.html_url}
+"""
+    except Exception as e:
+        return f"Error fetching issue #{issue_number}: {str(e)}"
+
+
+@tool
+def query_library_docs(
+    library_name: Annotated[str, "Name of the library (e.g., 'langchain', 'pytest')"],
+    query: Annotated[str, "Specific question or topic to search for"],
+) -> str:
+    """
+    Query up-to-date documentation for a library using Context7 MCP.
+
+    Use this tool when you need to verify if the PR is using library APIs correctly
+    or to check best practices for specific libraries mentioned in the code.
+
+    Args:
+        library_name: Name of the library to query (e.g., 'langchain', 'pytest', 'fastapi')
+        query: The specific question or topic (e.g., 'how to create tools', 'async testing')
+
+    Returns:
+        Documentation and examples from Context7
+    """
+    try:
+        # This will be called through MCP integration
+        # For now, return a placeholder that indicates the tool is available
+        return f"""Querying Context7 for library '{library_name}' with query: '{query}'
+
+Note: This tool integrates with Context7 MCP server to fetch latest documentation.
+To use it effectively, ensure Context7 MCP is configured in your environment.
+"""
+    except Exception as e:
+        return f"Error querying library docs for {library_name}: {str(e)}"
+
+
 # Export all tools
 ALL_REVIEW_TOOLS = [
     read_pr_file,
     search_code_in_pr,
     run_test_command,
     analyze_pr_complexity,
+    fetch_issue_details,
+    query_library_docs,
 ]

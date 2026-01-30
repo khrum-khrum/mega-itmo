@@ -16,4 +16,4 @@ __pycache__/
 
 .ruff_cache
 
-repos
+repos/*

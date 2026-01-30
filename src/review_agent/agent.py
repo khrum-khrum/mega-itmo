@@ -23,6 +23,8 @@ class PRData:
     commits_count: int
     additions: int
     deletions: int
+    head_branch: str  # PR branch to checkout
+    base_branch: str  # Target branch
 
 
 @dataclass
@@ -50,43 +52,84 @@ class ReviewAgent:
 
     SYSTEM_PROMPT = """You are an expert code reviewer performing automated code review.
 
-Your task is to analyze Pull Request changes and provide constructive, actionable feedback.
+Your PRIMARY GOAL is to ensure that Pull Requests:
+1. **IMPLEMENT THE ISSUE REQUIREMENTS** - The code must solve what the issue asks for
+2. **ACTUALLY WORK** - Tests must pass, code must be functional
+3. **FOLLOW BEST PRACTICES** - Code quality, security, performance
 
-WORKFLOW:
-1. **Understand the PR**: Read the PR description and related Issue to understand the goals
-2. **Analyze Changes**: Review the diff to see what was modified
-3. **Examine Context**: Use tools to read changed files and search for related code
-4. **Identify Issues**: Look for:
+CRITICAL WORKFLOW:
+1. **Understand Issue Requirements**:
+   - Use `fetch_issue_details` to get the original issue
+   - Identify ALL requirements and acceptance criteria
+   - Understand what problem needs to be solved
+
+2. **Verify Implementation**:
+   - Read changed files using `read_pr_file`
+   - Check if code implements ALL issue requirements
+   - Look for missing functionality or partial implementations
+
+3. **Run Tests (MANDATORY)**:
+   - Use `run_test_command` to execute tests
+   - Verify all tests pass
+   - Check for test coverage of new functionality
+   - **DO NOT APPROVE if tests fail or don't exist**
+
+4. **Check Code Quality**:
+   - Security vulnerabilities (SQL injection, XSS, etc.)
    - Bugs and logic errors
-   - Security vulnerabilities
    - Performance issues
-   - Code style violations
-   - Missing tests or documentation
-   - Deviations from the Issue requirements
-5. **Verify Quality**: Check if tests pass and code meets standards
-6. **Generate Review**: Provide clear, constructive feedback
+   - Best practices for libraries used
+   - Use `query_library_docs` to verify correct library usage
 
-REVIEW GUIDELINES:
-- Be constructive and helpful, not overly critical
-- Explain WHY something is an issue and HOW to fix it
-- Praise good implementations
-- Focus on significant issues, not minor style nitpicks
-- Check if the PR actually solves the Issue requirements
-- Verify that tests exist and pass (if applicable)
+5. **Examine Context**:
+   - Use `search_code_in_pr` to find related code
+   - Use `analyze_pr_complexity` for complex files
+   - Ensure consistency with existing codebase
 
-TOOL USAGE:
-- Use `read_pr_file` to examine changed files in detail
-- Use `search_code_in_pr` to find related code or patterns
-- Use `run_test_command` to verify tests pass
-- Use `analyze_pr_complexity` to identify complex code
+VERIFICATION REQUIREMENTS (ALL MANDATORY):
+✅ Issue requirements are FULLY implemented (not partially)
+✅ Tests exist and PASS
+✅ Code actually works (no broken functionality)
+✅ No security vulnerabilities
+✅ Libraries are used correctly
+✅ Implementation solves the problem correctly
+
+TOOL USAGE (in this order):
+1. `fetch_issue_details` - Get original issue requirements
+2. `read_pr_file` - Read changed files to understand implementation
+3. `run_test_command` - Run tests (e.g., "pytest", "npm test", etc.)
+4. `query_library_docs` - Verify library usage if needed
+5. `search_code_in_pr` - Find related code patterns
+6. `analyze_pr_complexity` - Check complex files
+
+DECISION CRITERIA:
+- **APPROVE**: All requirements met, tests pass, code works, high quality
+- **REQUEST_CHANGES**: Tests fail, missing requirements, bugs, security issues
+- **COMMENT**: Minor suggestions, questions, or clarifications needed
+
+**NEVER APPROVE CODE THAT:**
+- Doesn't implement the full issue requirements
+- Has failing tests or no tests
+- Doesn't work or has bugs
+- Has security vulnerabilities
+- Uses libraries incorrectly
 
 OUTPUT FORMAT:
-After your review, provide:
-1. Overall assessment (APPROVE / REQUEST_CHANGES / COMMENT)
-2. Summary of findings
-3. Specific comments for issues found (with file path and approximate line number)
+**DECISION:** [APPROVE / REQUEST_CHANGES / COMMENT]
 
-Be thorough but fair in your review.
+**ISSUE VERIFICATION:**
+[List each issue requirement and confirm if implemented]
+
+**TESTS:**
+[Report test execution results - MUST run tests]
+
+**SUMMARY:**
+[Overall assessment]
+
+**COMMENTS:**
+[Specific issues with file:line references]
+
+Be thorough, rigorous, and prioritize correctness over speed.
 """
 
     def __init__(
@@ -127,23 +170,27 @@ Be thorough but fair in your review.
             ReviewResult with review details
         """
         try:
-            # 1. Get PR data
+            # 1. Get PR data and related issue
             if verbose:
                 print(f"\n📋 Fetching Pull Request #{pr_number}...")
-            pr_data = self._fetch_pr_data(repo_name, pr_number)
+            pr_data, issue_details = self._fetch_pr_data(repo_name, pr_number)
 
             if verbose:
                 print(f"✅ PR #{pr_data.number}: {pr_data.title}")
                 print(f"   Changed files: {len(pr_data.changed_files)}")
                 print(f"   +{pr_data.additions} -{pr_data.deletions}")
+                print(f"   Branch: {pr_data.head_branch} -> {pr_data.base_branch}")
+                if issue_details:
+                    print(f"   Related Issue: #{pr_data.issue_number}")
 
-            # 2. Clone repository
+            # 2. Clone repository and checkout PR branch
             if verbose:
-                print(f"\n📦 Cloning repository {repo_name}...")
-            self.repo_path = self.github.clone_repository(repo_name)
+                print(f"\n📦 Cloning repository {repo_name} (branch: {pr_data.head_branch})...")
+            self.repo_path = self.github.clone_repository(repo_name, branch=pr_data.head_branch)
 
             if verbose:
                 print(f"✅ Repository cloned to: {self.repo_path}")
+                print(f"✅ Checked out to PR branch: {pr_data.head_branch}")
 
             # 3. Change working directory to repo
             original_dir = os.getcwd()
@@ -163,8 +210,8 @@ Be thorough but fair in your review.
                 # Override system prompt for review agent
                 self.langchain_agent.agent = self._create_review_agent()
 
-                # 5. Prepare review prompt
-                review_prompt = self._build_review_prompt(pr_data)
+                # 5. Prepare review prompt with issue details
+                review_prompt = self._build_review_prompt(pr_data, issue_details)
 
                 # 6. Run the agent
                 if verbose:
@@ -266,26 +313,42 @@ Be thorough but fair in your review.
             print(f"\n✅ Repository preserved at: {self.repo_path}")
         self.repo_path = None
 
-    def _fetch_pr_data(self, repo_name: str, pr_number: int) -> PRData:
+    def _fetch_pr_data(self, repo_name: str, pr_number: int) -> tuple[PRData, str | None]:
         """
-        Fetch Pull Request data from GitHub.
+        Fetch Pull Request data and related Issue from GitHub.
 
         Args:
             repo_name: Repository name (owner/repo)
             pr_number: Pull Request number
 
         Returns:
-            PRData object with PR information
+            Tuple of (PRData object with PR information, Issue details string or None)
         """
         pr = self.github.get_pull_request(repo_name, pr_number)
 
         # Extract issue number from PR body or title
         issue_number = None
+        issue_details = None
         import re
         if pr.body:
             match = re.search(r"#(\d+)", pr.body)
             if match:
                 issue_number = int(match.group(1))
+                # Fetch the issue details
+                try:
+                    issue = self.github.get_issue(repo_name, issue_number)
+                    issue_details = f"""**Issue #{issue.number}: {issue.title}**
+
+**Status:** {issue.state}
+**Labels:** {', '.join(issue.labels)}
+
+**Description:**
+{issue.body}
+
+**URL:** {issue.url}
+"""
+                except Exception as e:
+                    issue_details = f"Failed to fetch issue #{issue_number}: {str(e)}"
 
         # Get changed files
         changed_files = [f.filename for f in pr.get_files()]
@@ -298,7 +361,7 @@ Be thorough but fair in your review.
                 diff_lines.append(file.patch[:1000])  # Limit patch size
         diff = "\n".join(diff_lines)
 
-        return PRData(
+        pr_data = PRData(
             number=pr.number,
             title=pr.title,
             body=pr.body or "",
@@ -310,23 +373,41 @@ Be thorough but fair in your review.
             commits_count=pr.commits,
             additions=pr.additions,
             deletions=pr.deletions,
+            head_branch=pr.head.ref,  # PR branch name
+            base_branch=pr.base.ref,  # Target branch name
         )
 
-    def _build_review_prompt(self, pr_data: PRData) -> str:
+        return pr_data, issue_details
+
+    def _build_review_prompt(self, pr_data: PRData, issue_details: str | None = None) -> str:
         """
-        Build review prompt from PR data.
+        Build review prompt from PR data and related issue.
 
         Args:
             pr_data: Pull Request data
+            issue_details: Related issue details (optional)
 
         Returns:
             Formatted prompt for review agent
         """
+        # Build issue section if available
+        issue_section = ""
+        if issue_details:
+            issue_section = f"""## Related Issue - REQUIREMENTS TO VERIFY
+
+{issue_details}
+
+**CRITICAL:** You MUST verify that the PR implementation addresses ALL requirements from the issue above.
+The PR should only be approved if it fully implements the issue requirements and the code works.
+
+"""
+
         prompt = f"""# Pull Request to Review
 
 **PR #:** {pr_data.number}
 **Title:** {pr_data.title}
 **State:** {pr_data.state}
+**Branch:** {pr_data.head_branch} → {pr_data.base_branch}
 **URL:** {pr_data.url}
 **Related Issue:** #{pr_data.issue_number if pr_data.issue_number else 'Unknown'}
 
@@ -334,12 +415,16 @@ Be thorough but fair in your review.
 
 {pr_data.body}
 
+{issue_section}
+
 ## Changes Summary
 
 - **Commits:** {pr_data.commits_count}
 - **Changed Files:** {len(pr_data.changed_files)}
 - **Additions:** +{pr_data.additions}
 - **Deletions:** -{pr_data.deletions}
+
+**Note:** You are currently on branch `{pr_data.head_branch}` which contains all the PR changes.
 
 ## Changed Files
 
@@ -355,15 +440,36 @@ Be thorough but fair in your review.
 
 **Your task:** Review this Pull Request thoroughly and provide feedback.
 
+**VERIFICATION CHECKLIST (MANDATORY):**
+1. **Issue Requirements:** Does the PR implement ALL requirements from the issue?
+2. **Code Quality:** Is the code well-written, secure, and follows best practices?
+3. **Tests:** Run tests to verify the code works (use run_test_command)
+4. **Correctness:** Does the implementation solve the problem correctly?
+5. **Library Usage:** If using external libraries, verify correct usage (use query_library_docs)
+
 Use the available tools to:
-1. Read changed files in detail
-2. Search for related code
-3. Run tests if applicable
-4. Analyze code complexity
+1. Fetch issue details (if not already provided) using fetch_issue_details
+2. Read changed files in detail using read_pr_file
+3. Search for related code using search_code_in_pr
+4. **RUN TESTS** using run_test_command (MANDATORY - must verify code works!)
+5. Query library documentation using query_library_docs if needed
+6. Analyze code complexity using analyze_pr_complexity
+
+**DO NOT APPROVE** if:
+- Tests are failing
+- Issue requirements are not fully implemented
+- Code has bugs or security issues
+- Implementation doesn't work
 
 Provide your review in this format:
 
 **DECISION:** [APPROVE / REQUEST_CHANGES / COMMENT]
+
+**ISSUE VERIFICATION:**
+[Confirm whether the PR implements all issue requirements. Be specific.]
+
+**TESTS:**
+[Report on test results. Did you run tests? Did they pass?]
 
 **SUMMARY:**
 [Overall assessment of the PR]
@@ -414,22 +520,48 @@ Provide your review in this format:
         # Simple parsing logic
         approved = "APPROVE" in output and "REQUEST_CHANGES" not in output
 
-        # Extract summary (everything between SUMMARY: and COMMENTS:)
-        summary_match = output.split("**SUMMARY:**")
-        if len(summary_match) > 1:
-            summary_part = summary_match[1].split("**COMMENTS:**")[0].strip()
-        else:
-            summary_part = output[:500]  # Fallback to first 500 chars
+        # Build comprehensive summary including all sections
+        summary_parts = []
 
-        # Extract comments (simple heuristic)
-        comments = []
-        # For now, we'll include comments in the summary
-        # Future improvement: parse individual comments with file/line info
+        # Extract issue verification
+        if "**ISSUE VERIFICATION:**" in output:
+            issue_match = output.split("**ISSUE VERIFICATION:**")
+            if len(issue_match) > 1:
+                issue_part = issue_match[1].split("**")[0].strip()
+                summary_parts.append(f"**Issue Verification:**\n{issue_part}")
+
+        # Extract test results
+        if "**TESTS:**" in output:
+            test_match = output.split("**TESTS:**")
+            if len(test_match) > 1:
+                test_part = test_match[1].split("**")[0].strip()
+                summary_parts.append(f"\n**Tests:**\n{test_part}")
+
+        # Extract summary
+        if "**SUMMARY:**" in output:
+            summary_match = output.split("**SUMMARY:**")
+            if len(summary_match) > 1:
+                summary_part = summary_match[1].split("**COMMENTS:**")[0].strip()
+                summary_parts.append(f"\n**Summary:**\n{summary_part}")
+
+        # Extract comments
+        if "**COMMENTS:**" in output:
+            comments_match = output.split("**COMMENTS:**")
+            if len(comments_match) > 1:
+                comments_part = comments_match[1].strip()
+                if comments_part:
+                    summary_parts.append(f"\n**Comments:**\n{comments_part}")
+
+        # Combine all parts or use fallback
+        if summary_parts:
+            full_summary = "\n".join(summary_parts)
+        else:
+            full_summary = output[:1000]  # Fallback to first 1000 chars
 
         return ReviewResult(
             success=True,
-            review_summary=summary_part,
-            comments=comments,
+            review_summary=full_summary,
+            comments=[],  # Comments are included in summary for now
             approved=approved,
         )
 

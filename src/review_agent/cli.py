@@ -112,6 +112,9 @@ def main(
             click.echo("❌ Error: OPENROUTER_API_KEY environment variable not set", err=True)
             sys.exit(1)
 
+        # Set GITHUB_REPO env var for tools to access
+        os.environ["GITHUB_REPO"] = repo
+
         github_client = GitHubClient(token=github_token, repos_dir=repos_dir)
 
         # Run review agent

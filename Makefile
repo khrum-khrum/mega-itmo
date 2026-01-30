@@ -37,7 +37,7 @@ run-review-example:
 	python -m src.review_agent.cli \
 		--repo $(REPO) \
 		--pr $(PR) \
-		--model meta-llama/llama-3.1-70b-instruct \
+		--model arcee-ai/trinity-large-preview:free \
 		--verbose
 
 clean:
